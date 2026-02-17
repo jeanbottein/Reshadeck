@@ -435,16 +435,20 @@ class Plugin:
                     os.chmod(dest_path, 0o644)
                 except Exception:
                     decky_plugin.logger.debug(f"could not copy {item}")
-            # Copy textures to the gamescope Textures folder
+            # Copy textures (including subdirectories) to the gamescope Textures folder
             if Path(textures_folder).exists():
-                Path(textures_destination).mkdir(parents=True, exist_ok=True)
-                for item in Path(textures_folder).iterdir():
-                    if item.is_file():
-                        try:
-                            dest_path = shutil.copy(item, textures_destination)
-                            os.chmod(dest_path, 0o644)
-                        except Exception:
-                            decky_plugin.logger.debug(f"could not copy {item}")
+                try:
+                    shutil.copytree(
+                        textures_folder,
+                        textures_destination,
+                        dirs_exist_ok=True,
+                    )
+                    # Fix permissions on all copied files
+                    for root, dirs, files in os.walk(textures_destination):
+                        for f in files:
+                            os.chmod(os.path.join(root, f), 0o644)
+                except Exception:
+                    decky_plugin.logger.debug(f"could not copy textures")
             decky_plugin.logger.info("Initialized")
             decky_plugin.logger.info(str(await Plugin.get_shader_list(self)))
             Plugin.load_config()
