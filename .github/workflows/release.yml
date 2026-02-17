@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Determine New Version
+        id: version
+        run: |
+          python3 .github/scripts/determine_version.py
+
+      - name: Check if Release Needed
+        if: steps.version.outputs.should_release != 'true'
+        run: |
+          echo "No release needed. Skipping."
+
+      - name: Setup Node.js and pnpm
+        if: steps.version.outputs.should_release == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Install pnpm
+        if: steps.version.outputs.should_release == 'true'
+        uses: pnpm/action-setup@v2
+        with:
+          version: 7
+          run_install: false
+
+      - name: Update package.json
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          # Use npm or jq to update version safely
+          # We need to install jq if not present, but ubuntu-latest has it.
+          tmp=$(mktemp)
+          jq --arg v "${{ steps.version.outputs.new_version }}" '.version = $v' package.json > "$tmp" && mv "$tmp" package.json
+          
+          # Verify update
+          cat package.json | grep version
+
+      - name: Commit version bump (Detached)
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add package.json
+          git commit -m "chore(release): ${{ steps.version.outputs.new_version }}"
+          
+          # Tag this commit
+          git tag "v${{ steps.version.outputs.new_version }}"
+          
+          # Push tag only? No, we will push the tag in the release step implicitly or explicitly?
+          # The user said "package.json file contains a version that must be changed in a commit outside of the main branch, the tag will be on this commit"
+          # So we just tag it locally, and when we create release, we point it to the SHA or Tag.
+          # Release action usually creates a tag if it doesn't exist?
+          # Let's push the tag explicitly to be safe, but NOT the commit to main.
+          git push origin "v${{ steps.version.outputs.new_version }}"
+
+      - name: Build Release
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          chmod +x build_release.sh
+          ./build_release.sh
+
+      - name: Create Release
+        if: steps.version.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.version.outputs.new_version }}"
+          name: "v${{ steps.version.outputs.new_version }}"
+          body: |
+            ## Changes
+            ${{ steps.version.outputs.changelog }}
+          files: |
+            *.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
