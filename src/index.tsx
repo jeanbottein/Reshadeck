@@ -17,7 +17,7 @@ import {
     SliderField
 } from "decky-frontend-lib";
 import { VFC, useState, useEffect, useRef } from "react";
-import { MdWbShade } from "react-icons/md";
+import { RiTvLine } from "react-icons/ri";
 import logo from "../assets/logo.png";
 
 // ---- Types ----
@@ -31,6 +31,7 @@ interface ShaderParam {
     ui_max?: number;
     ui_step?: number;
     ui_label?: string;
+    ui_items?: string[];
 }
 
 // ---- Display helpers ----
@@ -168,6 +169,33 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                         disabled={isDisabled}
                         onChange={(checked: boolean) => {
                             handleParamChange(p.name, checked);
+                        }}
+                    />
+                </PanelSectionRow>
+            );
+        }
+
+        // Combo / radio: render as dropdown with named options
+        if (p.ui_items && p.ui_items.length > 0 && (p.ui_type === "combo" || p.ui_type === "radio")) {
+            const comboOptions: DropdownOption[] = p.ui_items.map((label, idx) => ({
+                data: idx,
+                label: label,
+            } as SingleDropdownOption));
+            const currentIdx = typeof p.value === "number" ? p.value : 0;
+
+            return (
+                <PanelSectionRow key={p.name}>
+                    <div style={{ marginBottom: "4px", fontSize: "12px" }}>
+                        {formatDisplayName(p.ui_label || p.name)}
+                    </div>
+                    <Dropdown
+                        menuLabel={formatDisplayName(p.ui_label || p.name)}
+                        strDefaultLabel={p.ui_items[currentIdx] || "Unknown"}
+                        rgOptions={comboOptions}
+                        selectedOption={currentIdx}
+                        disabled={isDisabled}
+                        onChange={(opt: DropdownOption) => {
+                            handleParamChange(p.name, opt.data as number);
                         }}
                     />
                 </PanelSectionRow>
@@ -323,7 +351,7 @@ export default definePlugin((serverApi: ServerAPI) => {
     return {
         title: <div className={staticClasses.Title}>Reshadeck+</div>,
         content: <Content serverAPI={serverApi} />,
-        icon: <MdWbShade />,
+        icon: <RiTvLine />,
         onDismount() {
             //    suspend_registers[0].unregister();
             //    suspend_registers[1].unregister();

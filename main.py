@@ -40,6 +40,9 @@ _RE_UI = {
     "ui_label": re.compile(r'ui_label\s*=\s*"([^"]*)"'),
 }
 
+# Regex for combo/radio ui_items  (e.g.  ui_items = "Off\0Hard Cut\0Smooth Fade\0"; )
+_RE_UI_ITEMS = re.compile(r'ui_items\s*=\s*"((?:[^"\\]|\\0)*)"')
+
 # Skip engine-provided uniforms (timer, framecount, etc.)
 _RE_SOURCE = re.compile(r'source\s*=\s*"')
 
@@ -88,6 +91,13 @@ class Plugin:
                 hit = pat.search(annotation)
                 if hit:
                     p[key] = hit.group(1)
+
+            # Parse combo / radio items (\0-separated list)
+            items_hit = _RE_UI_ITEMS.search(annotation)
+            if items_hit:
+                raw_items = items_hit.group(1)
+                # Split on literal \0 sequences, filter empty trailing entries
+                p["ui_items"] = [s for s in raw_items.split("\\0") if s]
 
             # Parse default value
             if utype == "float":

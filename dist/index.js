@@ -77,8 +77,8 @@
   }
 
   // THIS FILE IS AUTO GENERATED
-  function MdWbShade (props) {
-    return GenIcon({"tag":"svg","attr":{"viewBox":"0 0 24 24"},"child":[{"tag":"path","attr":{"fill":"none","d":"M0 0h24v24H0V0z"}},{"tag":"path","attr":{"d":"M14 12v2.5l5.5 5.5H22zm0 8h3l-3-3zM8 4l-6 6h2v10h8V10h2L8 4zm1 10H7v-4h2v4z"}}]})(props);
+  function RiTvLine (props) {
+    return GenIcon({"tag":"svg","attr":{"viewBox":"0 0 24 24"},"child":[{"tag":"path","attr":{"d":"M15.4142 5.00004H21.0082C21.556 5.00004 22 5.44467 22 6.00091V19.9992C22 20.5519 21.5447 21 21.0082 21H2.9918C2.44405 21 2 20.5554 2 19.9992V6.00091C2 5.44815 2.45531 5.00004 2.9918 5.00004H8.58579L6.05025 2.46451L7.46447 1.05029L11.4142 5.00004H12.5858L16.5355 1.05029L17.9497 2.46451L15.4142 5.00004ZM4 7.00004V19H20V7.00004H4Z"}}]})(props);
   }
 
   // ---- Display helpers ----
@@ -174,6 +174,19 @@
               return (window.SP_REACT.createElement(deckyFrontendLib.PanelSectionRow, { key: p.name },
                   window.SP_REACT.createElement(deckyFrontendLib.ToggleField, { label: formatDisplayName(p.ui_label || p.name), checked: p.value, disabled: isDisabled, onChange: (checked) => {
                           handleParamChange(p.name, checked);
+                      } })));
+          }
+          // Combo / radio: render as dropdown with named options
+          if (p.ui_items && p.ui_items.length > 0 && (p.ui_type === "combo" || p.ui_type === "radio")) {
+              const comboOptions = p.ui_items.map((label, idx) => ({
+                  data: idx,
+                  label: label,
+              }));
+              const currentIdx = typeof p.value === "number" ? p.value : 0;
+              return (window.SP_REACT.createElement(deckyFrontendLib.PanelSectionRow, { key: p.name },
+                  window.SP_REACT.createElement("div", { style: { marginBottom: "4px", fontSize: "12px" } }, formatDisplayName(p.ui_label || p.name)),
+                  window.SP_REACT.createElement(deckyFrontendLib.Dropdown, { menuLabel: formatDisplayName(p.ui_label || p.name), strDefaultLabel: p.ui_items[currentIdx] || "Unknown", rgOptions: comboOptions, selectedOption: currentIdx, disabled: isDisabled, onChange: (opt) => {
+                          handleParamChange(p.name, opt.data);
                       } })));
           }
           if (p.type === "float" || p.type === "int") {
@@ -272,9 +285,9 @@
           }
       }, 5000);
       return {
-          title: window.SP_REACT.createElement("div", { className: deckyFrontendLib.staticClasses.Title }, "Reshadeck"),
+          title: window.SP_REACT.createElement("div", { className: deckyFrontendLib.staticClasses.Title }, "Reshadeck+"),
           content: window.SP_REACT.createElement(Content, { serverAPI: serverApi }),
-          icon: window.SP_REACT.createElement(MdWbShade, null),
+          icon: window.SP_REACT.createElement(RiTvLine, null),
           onDismount() {
               //    suspend_registers[0].unregister();
               //    suspend_registers[1].unregister();

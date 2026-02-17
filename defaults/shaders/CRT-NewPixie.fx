@@ -148,7 +148,7 @@ uniform float ghs <
 	ui_max = 1.0;
 	ui_step = 0.01;
 	ui_label = "Ghosting Strength [CRT-NewPixie]";
-> = 0.15;
+> = 0.05;
 
 uniform int border_mode <
 	ui_type = "combo";
