@@ -209,10 +209,7 @@
       };
       const hasParams = shaderParams.length > 0;
       return (window.SP_REACT.createElement("div", null,
-          window.SP_REACT.createElement(deckyFrontendLib.PanelSection, { title: "Notice" },
-              window.SP_REACT.createElement(deckyFrontendLib.PanelSectionRow, null,
-                  window.SP_REACT.createElement("div", { style: { fontSize: "12px" } }, "Shader application is not automatic in the background. You must reopen the plugin to apply the settings profile."))),
-          window.SP_REACT.createElement(deckyFrontendLib.PanelSection, { title: "Game" },
+          window.SP_REACT.createElement(deckyFrontendLib.PanelSection, { title: "Profile" },
               window.SP_REACT.createElement(deckyFrontendLib.PanelSectionRow, null,
                   window.SP_REACT.createElement(deckyFrontendLib.ToggleField, { label: "Per-Game Profile", checked: perGame, onChange: async (checked) => {
                           setPerGame(checked);
