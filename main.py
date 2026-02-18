@@ -56,8 +56,7 @@ class Plugin:
     _per_game = False     # True = save settings under this appid; False = use _global
     _params = {}          # {shader_name: {param_name: value, ...}}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
-    _stable_current = "None"
-    _stability_task = None  # type: asyncio.Task | None
+    _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
 
     # ------------------------------------------------------------------
     # Shader parameter parser
@@ -297,11 +296,6 @@ class Plugin:
     async def set_shader(self, shader_name):
         Plugin._current = shader_name
         
-        # Start stability timer to prevent persisting crashy shaders
-        if Plugin._stability_task:
-            Plugin._stability_task.cancel()
-        Plugin._stability_task = asyncio.create_task(Plugin._confirm_stability(shader_name))
-        
         Plugin.save_config()
         if Plugin._enabled:
             saved = Plugin._params.get(shader_name, {})
@@ -369,7 +363,6 @@ class Plugin:
             Plugin._enabled = config.get("enabled", False)
             Plugin._current = config.get("current", "None")
             Plugin._params = config.get("params", {})
-            Plugin._stable_current = Plugin._current
 
             # --- Retrocompatibility: migrate old contrast/sharpness keys ---
             if "contrast" in config or "sharpness" in config:
@@ -388,27 +381,15 @@ class Plugin:
     @staticmethod
     async def _save_config_delayed():
         try:
-            # Wait 60 seconds (1 minute) before saving
-            await asyncio.sleep(60)
+            # Wait 5 seconds before saving
+            await asyncio.sleep(5)
             Plugin._save_config_immediate()
             Plugin._save_task = None
         except asyncio.CancelledError:
             # Task was cancelled (e.g. by a new save request or flush)
             pass
 
-    @staticmethod
-    async def _confirm_stability(shader_name: str):
-        try:
-            # Wait 20 seconds to confirm the system didn't crash
-            await asyncio.sleep(20)
-            if Plugin._current == shader_name:
-                Plugin._stable_current = shader_name
-                logger.info(f"Shader {shader_name} marked as stable.")
-                Plugin.save_config()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Stability check failed: {e}")
+
 
     @staticmethod
     def save_config():
@@ -441,7 +422,7 @@ class Plugin:
             
             # Filter params to only include the current shader
             saved_params = {}
-            target_shader = Plugin._stable_current
+            target_shader = Plugin._current
             if target_shader in Plugin._params:
                 saved_params[target_shader] = Plugin._params[target_shader]
 
