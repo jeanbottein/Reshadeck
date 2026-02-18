@@ -73,7 +73,6 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
         // 2. Refresh info from backend (gets resolved ID like 'steamos' and per-game status)
         const info = (await serverAPI.callPluginMethod("get_game_info", {})).result as any;
-        setCurrentAppId(info.appid);
         setCurrentGameName(info.appname);
         setPerGame(info.per_game);
 
