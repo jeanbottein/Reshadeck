@@ -56,7 +56,7 @@ class Plugin:
     _per_game = False     # True = save settings under this appid; False = use _global
     _params = {}          # {shader_name: {param_name: value, ...}}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
-    _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
+
 
     # ------------------------------------------------------------------
     # Shader parameter parser
@@ -231,44 +231,54 @@ class Plugin:
 
     @staticmethod
     async def _patch_uniform(shader_name: str, uniform_name: str, value):
+        await Plugin._patch_uniforms_batch(shader_name, {uniform_name: value})
+
+    @staticmethod
+    async def _patch_uniforms_batch(shader_name: str, params: dict):
+        if not params:
+            return
+
         fx_file = Path(destination_folder) / shader_name
         if not fx_file.exists():
             logger.error(f"Cannot patch — {fx_file} not found")
             return
 
         text = fx_file.read_text(encoding="utf-8", errors="replace")
+        original_text = text
 
-        # Try annotated pattern first:
-        #   uniform <type> <name> < ... > = <old_value>;
-        pat_anno = re.compile(
-            rf"(uniform\s+(?:float|bool|int)\s+{re.escape(uniform_name)}\s*<[^>]*>\s*=\s*)([-+]?\d+\.?\d*|true|false)(\s*;)",
-            re.DOTALL | re.IGNORECASE,
-        )
-        m = pat_anno.search(text)
-        if not m:
-            # Try plain pattern:  uniform <type> <name>  = <old_value>;
-            pat_plain = re.compile(
-                rf"(uniform\s+(?:float|bool|int)\s+{re.escape(uniform_name)}\s*=\s*)([-+]?\d+\.?\d*|true|false)(\s*;)",
-                re.IGNORECASE,
+        for uniform_name, value in params.items():
+            # Try annotated pattern first
+            pat_anno = re.compile(
+                rf"(uniform\s+(?:float|bool|int)\s+{re.escape(uniform_name)}\s*<[^>]*>\s*=\s*)([-+]?\d+\.?\d*|true|false)(\s*;)",
+                re.DOTALL | re.IGNORECASE,
             )
-            m = pat_plain.search(text)
+            m = pat_anno.search(text)
+            if not m:
+                # Try plain pattern
+                pat_plain = re.compile(
+                    rf"(uniform\s+(?:float|bool|int)\s+{re.escape(uniform_name)}\s*=\s*)([-+]?\d+\.?\d*|true|false)(\s*;)",
+                    re.IGNORECASE,
+                )
+                m = pat_plain.search(text)
 
-        if not m:
-            logger.warning(f"Uniform {uniform_name} not found in {shader_name}")
-            return
+            if not m:
+                # logger.warning(f"Uniform {uniform_name} not found in {shader_name}")
+                continue
 
-        if isinstance(value, bool):
-            new_val = "true" if value else "false"
-        elif isinstance(value, float):
-            new_val = f"{value:.6f}"
-        elif isinstance(value, int):
-            new_val = str(value)
-        else:
-            new_val = str(value)
+            if isinstance(value, bool):
+                new_val = "true" if value else "false"
+            elif isinstance(value, float):
+                new_val = f"{value:.6f}"
+            elif isinstance(value, int):
+                new_val = str(value)
+            else:
+                new_val = str(value)
 
-        new_text = text[:m.start(2)] + new_val + text[m.end(2):]
-        fx_file.write_text(new_text, encoding="utf-8")
-        logger.info(f"Patched {uniform_name} → {new_val} in {shader_name}")
+            text = text[:m.start(2)] + new_val + text[m.end(2):]
+
+        if text != original_text:
+            fx_file.write_text(text, encoding="utf-8")
+            logger.info(f"Batch patched params in {shader_name}")
 
     # ------------------------------------------------------------------
     # Apply shader (calls set_shader.sh)
@@ -278,8 +288,8 @@ class Plugin:
             shader = Plugin._current
             # Patch all saved params into the .fx before applying
             saved = Plugin._params.get(shader, {})
-            for name, value in saved.items():
-                await Plugin._patch_uniform(shader, name, value)
+            # Batch update
+            await Plugin._patch_uniforms_batch(shader, saved)
             Plugin.save_config()
             logger.info("Applying shader " + shader)
             try:
@@ -299,8 +309,7 @@ class Plugin:
         Plugin.save_config()
         if Plugin._enabled:
             saved = Plugin._params.get(shader_name, {})
-            for name, value in saved.items():
-                await Plugin._patch_uniform(shader_name, name, value)
+            await Plugin._patch_uniforms_batch(shader_name, saved)
             logger.info("Setting and applying shader " + shader_name)
             try:
                 env = os.environ.copy()
@@ -316,8 +325,7 @@ class Plugin:
     async def toggle_shader(self, shader_name):
         if shader_name != "None":
             saved = Plugin._params.get(shader_name, {})
-            for name, value in saved.items():
-                await Plugin._patch_uniform(shader_name, name, value)
+            await Plugin._patch_uniforms_batch(shader_name, saved)
         logger.info("Applying shader " + shader_name)
         try:
             env = os.environ.copy()
@@ -660,7 +668,7 @@ class Plugin:
     # ------------------------------------------------------------------
     async def _main(self):
         # 1. Check for crash loop immediately
-        Plugin.check_crash_loop()
+        # 1. Check for crash loop moved after config load
 
         try:
             Path(destination_folder).mkdir(parents=True, exist_ok=True)
@@ -687,6 +695,7 @@ class Plugin:
             decky_plugin.logger.info("Initialized")
             decky_plugin.logger.info(str(await Plugin.get_shader_list(self)))
             Plugin.load_config()
+            Plugin.check_crash_loop()
             if Plugin._enabled:
                 await asyncio.sleep(5)
                 await Plugin.apply_shader(self)
