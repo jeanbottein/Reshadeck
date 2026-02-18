@@ -3,6 +3,9 @@
 # Ensure we are in the project root first
 cd "$(dirname "$0")"
 
+# Initialize submodules to ensure they are included
+git submodule update --init --recursive
+
 # Configuration — PLUGIN_NAME matches the install directory (must stay "Reshadeck")
 PLUGIN_NAME="Reshadeck"
 # Read version from package.json using node or jq. 
