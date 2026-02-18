@@ -178,16 +178,18 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     <div style={{ marginBottom: "4px", fontSize: "12px" }}>
                         {formatDisplayName(p.ui_label || p.name)}
                     </div>
-                    <Dropdown
-                        menuLabel={formatDisplayName(p.ui_label || p.name)}
-                        strDefaultLabel={selectedOption?.label as string || "Unknown"}
-                        rgOptions={comboOptions}
-                        selectedOption={selectedOption}
-                        disabled={isDisabled}
-                        onChange={(opt: DropdownOption) => {
-                            handleParamChange(p.name, opt.data as number);
-                        }}
-                    />
+                    <div style={{ marginTop: "4px", marginBottom: "10px", fontSize: "12px" }}>
+                        <Dropdown
+                            menuLabel={formatDisplayName(p.ui_label || p.name)}
+                            strDefaultLabel={selectedOption?.label as string || "Unknown"}
+                            rgOptions={comboOptions}
+                            selectedOption={selectedOption}
+                            disabled={isDisabled}
+                            onChange={(opt: DropdownOption) => {
+                                handleParamChange(p.name, opt.data as number);
+                            }}
+                        />
+                    </div>
                 </PanelSectionRow>
             );
         }
@@ -205,7 +207,6 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
             return (
                 <PanelSectionRow key={p.name}>
                     <SliderField
-                        bottomSeparator="none"
                         label={`${formatDisplayName(p.ui_label || p.name)}: ${(p.value as number).toFixed(2)}`}
                         min={0}
                         max={numSteps}
@@ -269,17 +270,19 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     />
                 </PanelSectionRow>
                 <PanelSectionRow>
-                    <Dropdown
-                        menuLabel="Select shader"
-                        strDefaultLabel={selectedShader.label as string}
-                        rgOptions={shaderOptions}
-                        selectedOption={selectedShader}
-                        onChange={async (newSelectedShader: DropdownOption) => {
-                            setSelectedShader(newSelectedShader);
-                            await serverAPI.callPluginMethod("set_shader", { shader_name: newSelectedShader.data });
-                            await fetchShaderParams();
-                        }}
-                    />
+                    <div style={{ marginTop: "4px" }}>
+                        <Dropdown
+                            menuLabel="Select shader"
+                            strDefaultLabel={selectedShader.label as string}
+                            rgOptions={shaderOptions}
+                            selectedOption={selectedShader}
+                            onChange={async (newSelectedShader: DropdownOption) => {
+                                setSelectedShader(newSelectedShader);
+                                await serverAPI.callPluginMethod("set_shader", { shader_name: newSelectedShader.data });
+                                await fetchShaderParams();
+                            }}
+                        />
+                    </div>
                 </PanelSectionRow>
             </PanelSection>
 
