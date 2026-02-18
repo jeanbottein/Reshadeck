@@ -415,11 +415,17 @@ class Plugin:
                     data = json.load(f)
 
             key = Plugin._config_key()
+            
+            # Filter params to only include the current shader
+            saved_params = {}
+            if Plugin._current in Plugin._params:
+                saved_params[Plugin._current] = Plugin._params[Plugin._current]
+
             entry = {
                 "appname": Plugin._appname if Plugin._per_game else "Global",
                 "enabled": Plugin._enabled,
                 "current": Plugin._current,
-                "params": Plugin._params,
+                "params": saved_params,
             }
             if Plugin._per_game:
                 entry["per_game"] = True
@@ -428,6 +434,8 @@ class Plugin:
             # When per_game is True, also store a stub under the appid so
             # we know to load per-game on next visit even if key != appid
             if Plugin._per_game and key == Plugin._appid:
+                if Plugin._appid not in data or not isinstance(data[Plugin._appid], dict):
+                     data[Plugin._appid] = {}
                 data[Plugin._appid]["per_game"] = True
 
             # When per_game is OFF, ensure the appid entry records per_game=False
