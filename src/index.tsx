@@ -173,6 +173,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                 label: label,
             } as SingleDropdownOption));
             const currentIdx = typeof p.value === "number" ? p.value : 0;
+            const selectedOption = comboOptions[currentIdx] || comboOptions[0];
 
             return (
                 <PanelSectionRow key={p.name}>
@@ -181,9 +182,9 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     </div>
                     <Dropdown
                         menuLabel={formatDisplayName(p.ui_label || p.name)}
-                        strDefaultLabel={p.ui_items[currentIdx] || "Unknown"}
+                        strDefaultLabel={selectedOption?.label as string || "Unknown"}
                         rgOptions={comboOptions}
-                        selectedOption={currentIdx}
+                        selectedOption={selectedOption}
                         disabled={isDisabled}
                         onChange={(opt: DropdownOption) => {
                             handleParamChange(p.name, opt.data as number);
