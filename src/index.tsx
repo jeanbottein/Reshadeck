@@ -80,7 +80,8 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
         // 3. Get shader list
         const shaderList = (await serverAPI.callPluginMethod("get_shader_list", {})).result as string[];
-        setShaderOptions(getShaderOptions(shaderList));
+        const options = getShaderOptions(shaderList);
+        setShaderOptions(options);
 
         // 4. Get enabled status
         let enabledResp = await serverAPI.callPluginMethod("get_shader_enabled", {});
@@ -89,10 +90,19 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
         // 5. Get current shader
         let curr = await serverAPI.callPluginMethod("get_current_shader", {});
-        setSelectedShader({
-            data: curr.result,
-            label: (curr.result == "None" || curr.result == "0" ? "None" : formatDisplayName(curr.result as string))
-        } as SingleDropdownOption);
+        let targetData = curr.result;
+        if (targetData === "0") targetData = "None";
+
+        // Find the matched option to ensure referential equality, which fixes the dropdown scroll position
+        const matchedOption = options.find(o => o.data === targetData);
+        if (matchedOption) {
+            setSelectedShader(matchedOption);
+        } else {
+            setSelectedShader({
+                data: targetData,
+                label: targetData === "None" ? "None" : formatDisplayName(targetData as string)
+            } as SingleDropdownOption);
+        }
 
         // 6. Fetch params
         await fetchShaderParams();
@@ -163,6 +173,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                 label: label,
             } as SingleDropdownOption));
             const currentIdx = typeof p.value === "number" ? p.value : 0;
+            const selectedOption = comboOptions[currentIdx] || comboOptions[0];
 
             return (
                 <PanelSectionRow key={p.name}>
@@ -171,9 +182,9 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     </div>
                     <Dropdown
                         menuLabel={formatDisplayName(p.ui_label || p.name)}
-                        strDefaultLabel={p.ui_items[currentIdx] || "Unknown"}
+                        strDefaultLabel={selectedOption?.label as string || "Unknown"}
                         rgOptions={comboOptions}
-                        selectedOption={currentIdx}
+                        selectedOption={selectedOption}
                         disabled={isDisabled}
                         onChange={(opt: DropdownOption) => {
                             handleParamChange(p.name, opt.data as number);

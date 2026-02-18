@@ -47,24 +47,20 @@ mkdir -p "$STAGING_DIR"
 echo "Staging files..."
 
 # 3. Copy necessary files to the staging directory
-# Using rsync to handle exclusions cleanly
-rsync -av \
-    --exclude='.git' \
-    --exclude='.github' \
-    --exclude='.vscode' \
-    --exclude='node_modules' \
-    --exclude='.pnpm-store' \
-    --exclude='src' \
-    --exclude='*.log' \
-    --exclude='.gitignore' \
-    --exclude='.idea' \
-    --exclude='.env' \
-    --exclude='Makefile' \
-    --exclude='*.zip' \
-    --exclude='build_release.sh' \
-    --exclude='deploy.sh' \
-    --exclude='dist/*.map' \
-    . "$STAGING_DIR"
+# Using cp to copy files (symlinks removed)
+cp -r \
+    dist \
+    shaders \
+    textures \
+    main.py \
+    plugin.json \
+    package.json \
+    LICENSE \
+    README.md \
+    "$STAGING_DIR"
+
+# Remove source maps if present
+rm -f "$STAGING_DIR/dist/"*.map
 
 # 4. Create the zip file
 echo "Creating zip archive..."

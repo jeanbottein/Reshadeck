@@ -14,6 +14,7 @@ textures_destination = decky_plugin.DECKY_USER_HOME + "/.local/share/gamescope/r
 shaders_folder = decky_plugin.DECKY_PLUGIN_DIR + "/shaders"
 textures_folder = decky_plugin.DECKY_PLUGIN_DIR + "/textures"
 config_file = decky_plugin.DECKY_PLUGIN_SETTINGS_DIR + "/config.json"
+crash_file = decky_plugin.DECKY_PLUGIN_SETTINGS_DIR + "/crash.json"
 
 # ---------------------------------------------------------------------------
 # Regex patterns for parsing .fx uniform parameters
@@ -54,6 +55,7 @@ class Plugin:
     _appname = "Unknown"
     _per_game = False     # True = save settings under this appid; False = use _global
     _params = {}          # {shader_name: {param_name: value, ...}}
+    _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
 
     # ------------------------------------------------------------------
@@ -293,6 +295,7 @@ class Plugin:
 
     async def set_shader(self, shader_name):
         Plugin._current = shader_name
+        
         Plugin.save_config()
         if Plugin._enabled:
             saved = Plugin._params.get(shader_name, {})
@@ -330,6 +333,8 @@ class Plugin:
     # ------------------------------------------------------------------
     # Config persistence with backward compatibility
     # ------------------------------------------------------------------
+    _save_task = None  # type: asyncio.Task | None
+
     @staticmethod
     def _config_key():
         """Return the config key to read/write.
@@ -374,7 +379,38 @@ class Plugin:
             logger.error(f"Failed to read config: {e}")
 
     @staticmethod
+    async def _save_config_delayed():
+        try:
+            # Wait 5 seconds before saving
+            await asyncio.sleep(5)
+            Plugin._save_config_immediate()
+            Plugin._save_task = None
+        except asyncio.CancelledError:
+            # Task was cancelled (e.g. by a new save request or flush)
+            pass
+
+
+
+    @staticmethod
     def save_config():
+        """Schedule a delayed save of the configuration."""
+        if Plugin._save_task:
+            Plugin._save_task.cancel()
+        
+        Plugin._save_task = asyncio.create_task(Plugin._save_config_delayed())
+
+    @staticmethod
+    def flush_pending_save():
+        """Force any pending save to write to disk immediately."""
+        if Plugin._save_task:
+            if not Plugin._save_task.done():
+                Plugin._save_task.cancel()
+                Plugin._save_config_immediate()
+            Plugin._save_task = None
+
+    @staticmethod
+    def _save_config_immediate():
+        """Write configuration to disk immediately."""
         try:
             Path(os.path.dirname(config_file)).mkdir(parents=True, exist_ok=True)
             data = {}
@@ -383,11 +419,18 @@ class Plugin:
                     data = json.load(f)
 
             key = Plugin._config_key()
+            
+            # Filter params to only include the current shader
+            saved_params = {}
+            target_shader = Plugin._current
+            if target_shader in Plugin._params:
+                saved_params[target_shader] = Plugin._params[target_shader]
+
             entry = {
                 "appname": Plugin._appname if Plugin._per_game else "Global",
                 "enabled": Plugin._enabled,
-                "current": Plugin._current,
-                "params": Plugin._params,
+                "current": target_shader,
+                "params": saved_params,
             }
             if Plugin._per_game:
                 entry["per_game"] = True
@@ -396,6 +439,8 @@ class Plugin:
             # When per_game is True, also store a stub under the appid so
             # we know to load per-game on next visit even if key != appid
             if Plugin._per_game and key == Plugin._appid:
+                if Plugin._appid not in data or not isinstance(data[Plugin._appid], dict):
+                     data[Plugin._appid] = {}
                 data[Plugin._appid]["per_game"] = True
 
             # When per_game is OFF, ensure the appid entry records per_game=False
@@ -440,7 +485,10 @@ class Plugin:
     async def set_per_game(self, enabled: bool):
         """Toggle per-game mode. When switching ON, copy global config to
         per-game. When switching OFF, the game will use global config."""
-        
+
+        # Flush any pending save before switching modes to ensure consistency
+        Plugin.flush_pending_save()
+
         prevEnabled = Plugin._enabled
         prevCurrent = Plugin._current
         prevParams = {}
@@ -510,6 +558,9 @@ class Plugin:
 
         decky_plugin.logger.info(f"Current game info received: AppID={appid}, Name={appname}")
 
+        # Flush any pending save for the previous game before switching
+        Plugin.flush_pending_save()
+
         prevEnabled = Plugin._enabled
         prevCurrent = Plugin._current
         # Capture parameters of the active shader to detect changes
@@ -557,9 +608,59 @@ class Plugin:
             return {"effect": "None"}
 
     # ------------------------------------------------------------------
+    # Crash Loop Protection (Canary)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _read_crash_count():
+        try:
+            if os.path.exists(crash_file):
+                with open(crash_file, "r") as f:
+                    return json.load(f).get("count", 0)
+        except Exception:
+            pass
+        return 0
+
+    @staticmethod
+    def _write_crash_count(count: int):
+        try:
+            with open(crash_file, "w") as f:
+                json.dump({"count": count}, f)
+        except Exception:
+            pass
+
+    @staticmethod
+    def check_crash_loop():
+        count = Plugin._read_crash_count()
+        # Threshold: 2 consecutive crashes
+        if count >= 2:
+            logger.warning(f"Crash loop detected (count={count}). Disabling shaders.")
+            Plugin._enabled = False
+            Plugin.save_config()  # Persist disabled state
+            Plugin._write_crash_count(0) # Reset count after taking action
+            return True
+        else:
+            Plugin._write_crash_count(count + 1)
+            return False
+
+    @staticmethod
+    async def mark_stable():
+        """Wait for 30 seconds of stable operation, then reset crash count."""
+        try:
+            await asyncio.sleep(30)
+            logger.info("System stable. Resetting crash count.")
+            Plugin._write_crash_count(0)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in mark_stable: {e}")
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
     async def _main(self):
+        # 1. Check for crash loop immediately
+        Plugin.check_crash_loop()
+
         try:
             Path(destination_folder).mkdir(parents=True, exist_ok=True)
             for item in Path(shaders_folder).glob("*.fx"):
@@ -588,5 +689,8 @@ class Plugin:
             if Plugin._enabled:
                 await asyncio.sleep(5)
                 await Plugin.apply_shader(self)
+            
+            # Start stability timer
+            asyncio.create_task(Plugin.mark_stable())
         except Exception:
             decky_plugin.logger.exception("main")
