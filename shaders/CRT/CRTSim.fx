@@ -131,10 +131,10 @@ uniform float Tuning_Barrel <
 
 static const float2 BloomScale = float2(0.025,0.025);
 
-texture NTSCArtifactTex <source="crtsim/artifacts.png";> { Width=256; Height=224;};
+texture NTSCArtifactTex <source = "CRT/crtsim/artifacts.png";> { Width=256; Height=224;};
 sampler2D NTSCArtifactSampler { Texture=NTSCArtifactTex; MinFilter=LINEAR; MagFilter=LINEAR; };
 
-texture shadowMaskSamplerTex <source="crtsim/mask.png";> { Width=64; Height=32;};
+texture shadowMaskSamplerTex <source = "CRT/crtsim/mask.png";> { Width=64; Height=32;};
 sampler2D shadowMaskSampler { Texture=shadowMaskSamplerTex; MinFilter=LINEAR; MagFilter=LINEAR; AddressU = REPEAT; AddressV = REPEAT; };
 
 texture2D CRTSim_prevFrameTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };

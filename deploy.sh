@@ -35,7 +35,8 @@ echo "Staging files..."
 
 # 3. Copy necessary files to the staging directory
 # Using cp to copy files (symlinks removed)
-cp -r \
+# Using cp to copy files (symlinks resolved)
+cp -R -L \
     dist \
     shaders \
     textures \

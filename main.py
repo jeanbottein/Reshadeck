@@ -468,18 +468,50 @@ class Plugin:
     # Shader list
     # ------------------------------------------------------------------
     @staticmethod
-    def _get_all_shaders():
+    def _get_all_shaders(category: str = "Default"):
         temp_pattern = re.compile(r"^.+_[A-Za-z0-9]{6}\.fx$")
-        return sorted(
-            (str(p.name)
-            for p in Path(destination_folder).glob("*.fx")
-            if not temp_pattern.match(p.name)),
-            key=str.lower
-        )
+        
+        target_dir = Path(destination_folder)
+        if category != "Default" and category != "None":
+             target_dir = target_dir / category
 
-    async def get_shader_list(self):
-        shaders = Plugin._get_all_shaders()
+        if not target_dir.exists():
+            return []
+
+        # glob("*.fx") only returns files in that specific dir (no recursive)
+        files = target_dir.glob("*.fx")
+        
+        results = []
+        for p in files:
+            if not temp_pattern.match(p.name):
+                # For subfolders, we want just the filename or partial path?
+                # The frontend likely expects what set_shader expects.
+                # set_shader expects a path relative to destination_folder OR just filename if in root.
+                # If we are in "Default", we return "Basic.fx".
+                # If we are in "SweetFX", we return "SweetFX/Technicolor.fx".
+                
+                if category == "Default":
+                    results.append(p.name)
+                else:
+                    results.append(f"{category}/{p.name}")
+
+        return sorted(results, key=str.lower)
+
+    async def get_shader_list(self, category: str = "Default"):
+        shaders = Plugin._get_all_shaders(category)
         return shaders
+
+    async def get_shader_packages(self):
+        """Return list of subfolders in destination_folder that contain shaders."""
+        p = Path(destination_folder)
+        if not p.exists():
+            return ["Default"]
+        
+        # List directories
+        # We assume any subdirectory in Shaders/ might be a package
+        # Filter out hidden ones or temp
+        dirs = [x.name for x in p.iterdir() if x.is_dir() and not x.name.startswith(".")]
+        return sorted(["Default"] + dirs, key=str.lower)
 
     async def get_shader_enabled(self):
         return Plugin._enabled
@@ -672,12 +704,41 @@ class Plugin:
 
         try:
             Path(destination_folder).mkdir(parents=True, exist_ok=True)
-            for item in Path(shaders_folder).glob("*.fx"):
-                try:
-                    dest_path = shutil.copy(item, destination_folder)
-                    os.chmod(dest_path, 0o644)
-                except Exception:
-                    decky_plugin.logger.debug(f"could not copy {item}")
+            
+            # Recursively copy shaders folder content to destination
+            # This handles subdirectories (SweetFX, etc.) and follows symlinks by default (via copytree default?)
+            # copytree(src, dst, dirs_exist_ok=True) added in 3.8.
+            # We want to copy the CONTENTS of shaders_folder into destination_folder.
+            # shutil.copytree(src, dst) expects dst to NOT exist or be empty if dirs_exist_ok=True.
+            
+            # Using dirs_exist_ok=True allows merging.
+            # However, we only simply want to overlay.
+            # Note: shaders_folder locally has symlinks. We want to copy content.
+            # shutil.copytree default symlinks=False (copies content). Good.
+            
+            try:
+                shutil.copytree(shaders_folder, destination_folder, dirs_exist_ok=True)
+            except Exception as e:
+                 decky_plugin.logger.debug(f"copytree failed: {e}. Fallback to manual copy?")
+                 
+            # Fix permissions
+            for root, dirs, files in os.walk(destination_folder):
+                for f in files:
+                    if f.endswith(".fx") or f.endswith(".sh"):
+                        try:
+                            os.chmod(os.path.join(root, f), 0o644)
+                            # Make the script executable
+                            if f.endswith(".sh"):
+                                os.chmod(os.path.join(root, f), 0o755)
+                        except:
+                            pass
+            
+            # for item in Path(shaders_folder).glob("*.fx"):
+            #     try:
+            #         dest_path = shutil.copy(item, destination_folder)
+            #         os.chmod(dest_path, 0o644)
+            #     except Exception:
+            #         decky_plugin.logger.debug(f"could not copy {item}")
             # Copy textures (including subdirectories) to the gamescope Textures folder
             if Path(textures_folder).exists():
                 try:

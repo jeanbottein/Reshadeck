@@ -46,6 +46,11 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     const [selectedShader, setSelectedShader] = useState<DropdownOption>(baseShader);
     const [shaderOptions, setShaderOptions] = useState<DropdownOption[]>([baseShader]);
     const [currentGameName, setCurrentGameName] = useState<string>("Unknown");
+    
+    // Packages
+    const [packageOptions, setPackageOptions] = useState<DropdownOption[]>([]);
+    const [selectedPackage, setSelectedPackage] = useState<DropdownOption>({ data: "Default", label: "Default" });
+
     const [shaderParams, setShaderParams] = useState<ShaderParam[]>([]);
     const paramTimeouts = useRef<{ [key: string]: number }>({});
     const [applyDisabled, setApplyDisabled] = useState(false);
@@ -53,7 +58,15 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
     const getShaderOptions = (shaderList: string[]): DropdownOption[] => [
         baseShader,
-        ...shaderList.map(s => ({ data: s, label: formatDisplayName(s) } as SingleDropdownOption))
+        ...shaderList.map(s => {
+            let label = formatDisplayName(s);
+            // If inside a package/subfolder, show only the filename in the dropdown
+            if (s.includes("/")) {
+                const parts = s.split("/");
+                label = formatDisplayName(parts[parts.length - 1]);
+            }
+            return { data: s, label: label } as SingleDropdownOption;
+        })
     ];
 
     const fetchShaderParams = async () => {
@@ -76,10 +89,10 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         setCurrentGameName(info.appname);
         setPerGame(info.per_game);
 
-        // 3. Get shader list
-        const shaderList = (await serverAPI.callPluginMethod("get_shader_list", {})).result as string[];
-        const options = getShaderOptions(shaderList);
-        setShaderOptions(options);
+        // 3. Get packages
+        const packages = (await serverAPI.callPluginMethod("get_shader_packages", {})).result as string[];
+        const pkgOptions = packages.map(p => ({ data: p, label: p } as SingleDropdownOption));
+        setPackageOptions(pkgOptions);
 
         // 4. Get enabled status
         let enabledResp = await serverAPI.callPluginMethod("get_shader_enabled", {});
@@ -91,11 +104,39 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         let targetData = curr.result;
         if (targetData === "0") targetData = "None";
 
+        // Determine package from current shader
+        let initialPackage = "Default";
+        if (targetData && targetData !== "None" && targetData.includes("/")) {
+             initialPackage = targetData.split("/")[0];
+        } else if (targetData && targetData !== "None") {
+             // Check if the current shader is actually in the Default package?
+             // Since we don't have the full list yet, we assume it is if no slash.
+             initialPackage = "Default";
+        }
+        
+        // Select package
+        const matchedPkg = pkgOptions.find(p => p.data === initialPackage) || pkgOptions[0];
+        setSelectedPackage(matchedPkg);
+
+        // Get shader list for this package
+        const shaderList = (await serverAPI.callPluginMethod("get_shader_list", { category: initialPackage })).result as string[];
+        const options = getShaderOptions(shaderList);
+        setShaderOptions(options);
+
         // Find the matched option to ensure referential equality, which fixes the dropdown scroll position
         const matchedOption = options.find(o => o.data === targetData);
         if (matchedOption) {
             setSelectedShader(matchedOption);
         } else {
+            // If the active shader is in another package (e.g. we just switched games or something),
+            // or if we simply failed to find it in the current list:
+            // For now, if we can't find it, we default to "None" visually, unless we prefer to show the raw path.
+            // But if we are viewing "Default" package and active is "SweetFX/Technicolor", checking "SweetFX/Technicolor" against ["Basic"] fails.
+            // So we probably want to set it to baseShader if not found in current package list.
+            
+            // However, targetData is the ACTIVE shader.
+            // If we are initing, we inferred the package from targetData, so it SHOULD be in the list.
+            
             setSelectedShader({
                 data: targetData,
                 label: targetData === "None" ? "None" : formatDisplayName(targetData as string)
@@ -272,6 +313,23 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                             });
                         }}
                     />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                    <div style={{ marginTop: "4px" }}>
+                        <Dropdown
+                            menuLabel="Package"
+                            strDefaultLabel={selectedPackage.label as string}
+                            rgOptions={packageOptions}
+                            selectedOption={selectedPackage}
+                            onChange={async (newPkg: DropdownOption) => {
+                                setSelectedPackage(newPkg);
+                                const list = (await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data })).result as string[];
+                                const newOpts = getShaderOptions(list);
+                                setShaderOptions(newOpts);
+                                setSelectedShader(baseShader);
+                            }}
+                        />
+                    </div>
                 </PanelSectionRow>
                 <PanelSectionRow>
                     <div style={{ marginTop: "4px" }}>
