@@ -19,7 +19,12 @@ env: ## Create default .env file
 	@echo -n "PLUGIN_FOLDER=" >> .env
 	@jq -r .name package.json >> .env
 
+submodules: ## Initialize git submodules
+	@echo "+ $@"
+	@git submodule update --init --recursive
+
 init: ## Initialize project
+	@$(MAKE) submodules
 	@$(MAKE) env
 	@$(MAKE) vendor
 	@echo -e "\n\033[1;36m Almost ready! Just a few things left to do:\033[0m\n"
