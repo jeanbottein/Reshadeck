@@ -8,11 +8,12 @@ import {
     ServerAPI,
     staticClasses,
     Dropdown,
+    DropdownItem,
     DropdownOption,
     SingleDropdownOption,
     SliderField
 } from "decky-frontend-lib";
-import { VFC, useState, useEffect, useRef } from "react";
+import { VFC, useState, useEffect, useRef, useMemo } from "react";
 import { RiTvLine } from "react-icons/ri";
 
 declare global {
@@ -45,7 +46,7 @@ const baseShader = { data: "None", label: "No Shader" } as SingleDropdownOption;
 const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     const [shadersEnabled, setShadersEnabled] = useState<boolean>(false);
     const [selectedShader, setSelectedShader] = useState<DropdownOption>(baseShader);
-    const [shaderOptions, setShaderOptions] = useState<DropdownOption[]>([baseShader]);
+    const [shaderList, setShaderList] = useState<string[]>([]);
     const [currentGameName, setCurrentGameName] = useState<string>("Unknown");
 
     // Packages
@@ -57,18 +58,21 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     const [applyDisabled, setApplyDisabled] = useState(false);
     const [perGame, setPerGame] = useState<boolean>(false);
 
-    const getShaderOptions = (shaderList: string[]): DropdownOption[] => [
-        baseShader,
-        ...shaderList.map(s => {
+    const shaderDropdownOptions = useMemo((): DropdownOption[] => {
+        const options: DropdownOption[] = [
+            { label: "No Shader", data: -1 }
+        ];
+        shaderList.forEach((s, index) => {
             let label = formatDisplayName(s);
             // If inside a package/subfolder, show only the filename in the dropdown
             if (s.includes("/")) {
                 const parts = s.split("/");
                 label = formatDisplayName(parts[parts.length - 1]);
             }
-            return { data: s, label: label } as SingleDropdownOption;
-        })
-    ];
+            options.push({ label: label, data: index });
+        });
+        return options;
+    }, [shaderList]);
 
     const fetchShaderParams = async () => {
         const resp = await serverAPI.callPluginMethod("get_shader_params", {});
@@ -128,25 +132,18 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         setSelectedPackage(matchedPkg);
 
         // Get shader list for this package
-        const shaderList = (await serverAPI.callPluginMethod("get_shader_list", { category: initialPackage })).result as string[];
-        const options = getShaderOptions(shaderList);
-        setShaderOptions(options);
+        const fetchedShaderList = (await serverAPI.callPluginMethod("get_shader_list", { category: initialPackage })).result as string[];
+        setShaderList(fetchedShaderList || []);
 
-        // Find the matched option to ensure referential equality, which fixes the dropdown scroll position
-        const matchedOption = options.find(o => o.data === targetData);
-        if (matchedOption) {
-            setSelectedShader(matchedOption);
+        if (targetData === "None") {
+            setSelectedShader(baseShader);
         } else {
-            // If the active shader is in another package (e.g. we just switched games or something),
-            // or if we simply failed to find it in the current list:
-            if (targetData === "None") {
-                setSelectedShader(baseShader);
-            } else {
-                setSelectedShader({
-                    data: targetData,
-                    label: formatDisplayName(targetData as string)
-                } as SingleDropdownOption);
-            }
+            // Simplified logic as we rely on indices for dropdown now
+            const labelRaw = targetData.includes("/") ? targetData.split("/").pop()! : targetData;
+            setSelectedShader({
+                data: targetData,
+                label: formatDisplayName(labelRaw)
+            });
         }
 
         // 6. Fetch params
@@ -223,21 +220,16 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
             return (
                 <PanelSectionRow key={p.name}>
-                    <div style={{ marginBottom: "4px", fontSize: "12px" }}>
-                        {formatDisplayName(p.ui_label || p.name)}
-                    </div>
-                    <div style={{ marginTop: "4px", marginBottom: "10px", fontSize: "12px" }}>
-                        <Dropdown
-                            menuLabel={formatDisplayName(p.ui_label || p.name)}
-                            strDefaultLabel={selectedOption?.label as string || "Unknown"}
-                            rgOptions={comboOptions}
-                            selectedOption={selectedOption}
-                            disabled={isDisabled}
-                            onChange={(opt: DropdownOption) => {
-                                handleParamChange(p.name, opt.data as number);
-                            }}
-                        />
-                    </div>
+                    <DropdownItem
+                        label={formatDisplayName(p.ui_label || p.name)}
+                        menuLabel={formatDisplayName(p.ui_label || p.name)}
+                        rgOptions={comboOptions}
+                        selectedOption={selectedOption.data}
+                        disabled={isDisabled}
+                        onChange={(opt: DropdownOption) => {
+                            handleParamChange(p.name, opt.data as number);
+                        }}
+                    />
                 </PanelSectionRow>
             );
         }
@@ -286,7 +278,6 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     <ToggleField
                         label="Per-Game Profile"
                         checked={perGame}
-                        bottomSeparator="none"
                         onChange={async (checked: boolean) => {
                             setPerGame(checked);
                             await serverAPI.callPluginMethod("set_per_game", { enabled: checked });
@@ -308,7 +299,7 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
             <PanelSection title="Shader">
                 <PanelSectionRow>
                     <ToggleField
-                        label="Enable Shaders"
+                        label="Enable Shader"
                         checked={shadersEnabled}
                         bottomSeparator="none"
                         onChange={async (enabled: boolean) => {
@@ -320,48 +311,61 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                         }}
                     />
                 </PanelSectionRow>
-                <PanelSectionRow>
-                    <div style={{ marginTop: "4px" }}>
-                        <Dropdown
-                            menuLabel="Package"
-                            strDefaultLabel={selectedPackage.label as string}
-                            rgOptions={packageOptions}
-                            selectedOption={selectedPackage}
-                            onChange={async (newPkg: DropdownOption) => {
-                                setSelectedPackage(newPkg);
-                                await serverAPI.callPluginMethod("set_active_category", { category: newPkg.data });
-                                try {
-                                    const resp = await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data });
-                                    const list = (resp.success && Array.isArray(resp.result))
-                                        ? (resp.result as string[])
-                                        : [];
-                                    const newOpts = getShaderOptions(list);
-                                    setShaderOptions(newOpts);
-                                } catch (e) {
-                                    console.error("Failed to fetch shader list", e);
-                                    setShaderOptions([baseShader]);
-                                }
+                <PanelSectionRow key="Package">
+                    <DropdownItem
+                        label="Package"
+                        menuLabel="Package"
+                        bottomSeparator="none"
+                        rgOptions={packageOptions}
+                        selectedOption={selectedPackage.data}
+                        onChange={async (newPkg: DropdownOption) => {
+                            if (newPkg.data === selectedPackage.data) {
+                                return;
+                            }
+                            const matchedPkg = packageOptions.find(p => p.data === newPkg.data) || newPkg;
+                            setSelectedPackage(matchedPkg);
+                            await serverAPI.callPluginMethod("set_active_category", { category: newPkg.data });
+                            try {
+                                const resp = await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data });
+                                const list = (resp.success && Array.isArray(resp.result))
+                                    ? (resp.result as string[])
+                                    : [];
+                                setShaderList(list);
+                            } catch (e) {
+                                console.error("Failed to fetch shader list", e);
+                                setShaderList([]);
+                            }
+                            setSelectedShader(baseShader);
+                            await serverAPI.callPluginMethod("set_shader", { shader_name: "None" });
+                            setShaderParams([]);
+                        }}
+                    />
+                </PanelSectionRow>
+                <PanelSectionRow key="Shader">
+                    <DropdownItem
+                        label="Shader"
+                        menuLabel="Select shader"
+                        rgOptions={shaderDropdownOptions}
+                        selectedOption={
+                            selectedShader.data === "None"
+                                ? -1
+                                : shaderList.indexOf(selectedShader.data as string)
+                        }
+                        onChange={async (opt: DropdownOption) => {
+                            const idx = opt.data as number;
+                            if (idx === -1) {
                                 setSelectedShader(baseShader);
                                 await serverAPI.callPluginMethod("set_shader", { shader_name: "None" });
                                 setShaderParams([]);
-                            }}
-                        />
-                    </div>
-                </PanelSectionRow>
-                <PanelSectionRow>
-                    <div style={{ marginTop: "4px" }}>
-                        <Dropdown
-                            menuLabel="Select shader"
-                            strDefaultLabel={selectedShader.label as string}
-                            rgOptions={shaderOptions}
-                            selectedOption={selectedShader}
-                            onChange={async (newSelectedShader: DropdownOption) => {
-                                setSelectedShader(newSelectedShader);
-                                await serverAPI.callPluginMethod("set_shader", { shader_name: newSelectedShader.data });
+                            } else {
+                                const path = shaderList[idx];
+                                const label = opt.label as string;
+                                setSelectedShader({ data: path, label });
+                                await serverAPI.callPluginMethod("set_shader", { shader_name: path });
                                 await fetchShaderParams();
-                            }}
-                        />
-                    </div>
+                            }
+                        }}
+                    />
                 </PanelSectionRow>
             </PanelSection>
 
