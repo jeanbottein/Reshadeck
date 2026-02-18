@@ -54,6 +54,7 @@ class Plugin:
     _appid = "Unknown"
     _appname = "Unknown"
     _per_game = False     # True = save settings under this appid; False = use _global
+    _active_category = "Default" # Store the active package/category context
     _params = {}          # {shader_name: {param_name: value, ...}}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
 
@@ -370,6 +371,7 @@ class Plugin:
 
             Plugin._enabled = config.get("enabled", False)
             Plugin._current = config.get("current", "None")
+            Plugin._active_category = config.get("active_category", "Default")
             Plugin._params = config.get("params", {})
 
             # --- Retrocompatibility: migrate old contrast/sharpness keys ---
@@ -437,7 +439,9 @@ class Plugin:
             entry = {
                 "appname": Plugin._appname if Plugin._per_game else "Global",
                 "enabled": Plugin._enabled,
+                "enabled": Plugin._enabled,
                 "current": target_shader,
+                "active_category": Plugin._active_category,
                 "params": saved_params,
             }
             if Plugin._per_game:
@@ -585,7 +589,13 @@ class Plugin:
             "appid": Plugin._appid,
             "appname": Plugin._appname,
             "per_game": Plugin._per_game,
+            "active_category": Plugin._active_category,
         }
+
+    async def set_active_category(self, category: str):
+        if category != Plugin._active_category:
+            Plugin._active_category = category
+            Plugin.save_config()
 
     async def set_current_game_info(self, appid: str, appname: str):
         # Recognize SteamOS menu / desktop

@@ -91,7 +91,11 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         setPerGame(info.per_game);
 
         // 3. Get packages
-        const packages = (await serverAPI.callPluginMethod("get_shader_packages", {})).result as string[];
+        // 3. Get packages
+        const pkgResp = await serverAPI.callPluginMethod("get_shader_packages", {});
+        const packages = (pkgResp.success && Array.isArray(pkgResp.result))
+            ? (pkgResp.result as string[])
+            : ["Default"];
         const pkgOptions = packages.map(p => ({ data: p, label: p } as SingleDropdownOption));
         setPackageOptions(pkgOptions);
 
@@ -102,16 +106,19 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
         // 5. Get current shader
         let curr = await serverAPI.callPluginMethod("get_current_shader", {});
-        let targetData = curr.result;
+        let targetData = curr.result as string;
         if (targetData === "0") targetData = "None";
 
         // Determine package from current shader
-        let initialPackage = "Default";
+        // Determine package logic:
+        // 1. If shader path has '/', use folder name
+        // 2. If shader != None, assume Default (or we'd need to search all)
+        // 3. If shader == None, use persisted active_category from backend
+        let initialPackage = info.active_category || "Default";
+
         if (targetData && targetData !== "None" && targetData.includes("/")) {
             initialPackage = targetData.split("/")[0];
         } else if (targetData && targetData !== "None") {
-            // Check if the current shader is actually in the Default package?
-            // Since we don't have the full list yet, we assume it is if no slash.
             initialPackage = "Default";
         }
 
@@ -322,10 +329,21 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                             selectedOption={selectedPackage}
                             onChange={async (newPkg: DropdownOption) => {
                                 setSelectedPackage(newPkg);
-                                const list = (await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data })).result as string[];
-                                const newOpts = getShaderOptions(list);
-                                setShaderOptions(newOpts);
+                                await serverAPI.callPluginMethod("set_active_category", { category: newPkg.data });
+                                try {
+                                    const resp = await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data });
+                                    const list = (resp.success && Array.isArray(resp.result))
+                                        ? (resp.result as string[])
+                                        : [];
+                                    const newOpts = getShaderOptions(list);
+                                    setShaderOptions(newOpts);
+                                } catch (e) {
+                                    console.error("Failed to fetch shader list", e);
+                                    setShaderOptions([baseShader]);
+                                }
                                 setSelectedShader(baseShader);
+                                await serverAPI.callPluginMethod("set_shader", { shader_name: "None" });
+                                setShaderParams([]);
                             }}
                         />
                     </div>
