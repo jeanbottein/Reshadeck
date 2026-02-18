@@ -330,6 +330,8 @@ class Plugin:
     # ------------------------------------------------------------------
     # Config persistence with backward compatibility
     # ------------------------------------------------------------------
+    _save_task = None  # type: asyncio.Task | None
+
     @staticmethod
     def _config_key():
         """Return the config key to read/write.
@@ -374,7 +376,36 @@ class Plugin:
             logger.error(f"Failed to read config: {e}")
 
     @staticmethod
+    async def _save_config_delayed():
+        try:
+            # Wait 60 seconds (1 minute) before saving
+            await asyncio.sleep(60)
+            Plugin._save_config_immediate()
+            Plugin._save_task = None
+        except asyncio.CancelledError:
+            # Task was cancelled (e.g. by a new save request or flush)
+            pass
+
+    @staticmethod
     def save_config():
+        """Schedule a delayed save of the configuration."""
+        if Plugin._save_task:
+            Plugin._save_task.cancel()
+        
+        Plugin._save_task = asyncio.create_task(Plugin._save_config_delayed())
+
+    @staticmethod
+    def flush_pending_save():
+        """Force any pending save to write to disk immediately."""
+        if Plugin._save_task:
+            if not Plugin._save_task.done():
+                Plugin._save_task.cancel()
+                Plugin._save_config_immediate()
+            Plugin._save_task = None
+
+    @staticmethod
+    def _save_config_immediate():
+        """Write configuration to disk immediately."""
         try:
             Path(os.path.dirname(config_file)).mkdir(parents=True, exist_ok=True)
             data = {}
@@ -440,7 +471,10 @@ class Plugin:
     async def set_per_game(self, enabled: bool):
         """Toggle per-game mode. When switching ON, copy global config to
         per-game. When switching OFF, the game will use global config."""
-        
+
+        # Flush any pending save before switching modes to ensure consistency
+        Plugin.flush_pending_save()
+
         prevEnabled = Plugin._enabled
         prevCurrent = Plugin._current
         prevParams = {}
@@ -509,6 +543,9 @@ class Plugin:
             return
 
         decky_plugin.logger.info(f"Current game info received: AppID={appid}, Name={appname}")
+
+        # Flush any pending save for the previous game before switching
+        Plugin.flush_pending_save()
 
         prevEnabled = Plugin._enabled
         prevCurrent = Plugin._current

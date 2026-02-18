@@ -9,6 +9,12 @@ if [ "$FXNAME" = "None" ] || [ -z "$FXNAME" ]; then
 
 else
     # Generic temp-file trick for ALL shaders to force gamescope reload
+    if [ ! -f "$SHADER_DIR/$FXNAME" ]; then
+        echo "Shader file $FXNAME not found in $SHADER_DIR"
+        DISPLAY=:0 xprop -root -remove GAMESCOPE_RESHADE_EFFECT
+        exit 1
+    fi
+
     BASENAME="${FXNAME%.fx}"
     RAND=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 6)
     TEMPFX="${BASENAME}_${RAND}.fx"
