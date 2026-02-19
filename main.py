@@ -404,13 +404,23 @@ class Plugin:
 
     @staticmethod
     async def _save_config_delayed():
+        # Capture the appid that invoked the save
+        invoking_appid = Plugin._appid
         try:
-            # Wait 5 seconds before saving
-            await asyncio.sleep(5)
+            # Wait 10 seconds before saving
+            await asyncio.sleep(10)
+            
+            # If the appid changed (game switched/closed) during the wait, abort the save
+            # to prevent overwriting the new game's config or saving crash data.
+            if Plugin._appid != invoking_appid:
+                decky_plugin.logger.info("AppID changed during save delay. Aborting save.")
+                Plugin._save_task = None
+                return
+
             Plugin._save_config_immediate()
             Plugin._save_task = None
         except asyncio.CancelledError:
-            # Task was cancelled (e.g. by a new save request or flush)
+            # Task was cancelled (e.g. by a new save request or game switch)
             pass
 
 
@@ -631,8 +641,12 @@ class Plugin:
 
         decky_plugin.logger.info(f"Current game info received: AppID={appid}, Name={appname}")
 
-        # Flush any pending save for the previous game before switching
-        Plugin.flush_pending_save()
+        # If a save was pending when the game switched, it implies the session
+        # was very short (<10s since last change). This often indicates a crash.
+        # We CANCEL the save to discard potential crash-causing settings.
+        if Plugin._save_task:
+            Plugin._save_task.cancel()
+            Plugin._save_task = None
 
         prevEnabled = Plugin._enabled
         prevCurrent = Plugin._current
@@ -708,6 +722,7 @@ class Plugin:
         if count >= 2:
             logger.warning(f"Crash loop detected (count={count}). Disabling shaders.")
             Plugin._enabled = False
+            Plugin._current = "None"
             Plugin.save_config()  # Persist disabled state
             Plugin._write_crash_count(0) # Reset count after taking action
             return True
