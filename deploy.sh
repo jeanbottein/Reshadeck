@@ -11,10 +11,6 @@ cd "$SRC"
 echo "Deploying from: $SRC"
 echo "Deploying to:   $DEST"
 
-# 0. Initialize submodules
-echo "Initializing submodules..."
-git submodule update --init --recursive
-
 # 1. Build the frontend
 echo "Building frontend..."
 if ! command -v pnpm &> /dev/null; then

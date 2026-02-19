@@ -19,10 +19,6 @@ env: ## Create default .env file
 	@echo -n "PLUGIN_FOLDER=" >> .env
 	@jq -r .name package.json >> .env
 
-submodules: ## Initialize git submodules
-	@echo "+ $@"
-	@git submodule update --init --recursive
-
 init: ## Initialize project
 	@$(MAKE) submodules
 	@$(MAKE) env
