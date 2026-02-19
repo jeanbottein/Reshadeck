@@ -475,6 +475,18 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     )}
                 </PanelSectionRow>
 
+                <PanelSectionRow>
+                    <ButtonItem
+                        bottomSeparator="none"
+                        onClick={async () => {
+                            await serverAPI.callPluginMethod("cleanup_legacy_files", {});
+                            await initState(); // Refresh list potentially
+                        }}
+                    >
+                        Clean Legacy Temp Files
+                    </ButtonItem>
+                </PanelSectionRow>
+
             </PanelSection>
 
             <PanelSection title="Information">

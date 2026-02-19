@@ -6,6 +6,8 @@ import subprocess
 import shutil
 import asyncio
 import re
+import random
+import string
 
 logger = decky_plugin.logger
 
@@ -182,7 +184,7 @@ class Plugin:
         return result
 
     async def set_shader_param(self, name: str, value):
-        """Set a single parameter value, patch the .fx file, and save config."""
+        """Set a single parameter value, update memory, and save config."""
         shader = Plugin._current
         if shader == "None":
             return
@@ -204,7 +206,6 @@ class Plugin:
             Plugin._params[shader] = {}
         Plugin._params[shader][name] = value
 
-        await Plugin._patch_uniform(shader, name, value)
         Plugin.save_config()
 
     async def reset_shader_params(self):
@@ -219,33 +220,19 @@ class Plugin:
         Plugin._params[shader] = {}
         for p in params:
             Plugin._params[shader][p["name"]] = p["default"]
-            await Plugin._patch_uniform(shader, p["name"], p["default"])
+            # await Plugin._patch_uniform(shader, p["name"], p["default"]) # No longer patching file here
 
         Plugin.save_config()
 
     # ------------------------------------------------------------------
-    # In-place .fx patching (generalized)
+    # In-place .fx patching (generalized) -> Now Memory Patching
     # ------------------------------------------------------------------
 
-    # Pattern for annotated default:  > = <value> ;
-    _RE_ANNO_VALUE = None  # built per-uniform below
-
     @staticmethod
-    async def _patch_uniform(shader_name: str, uniform_name: str, value):
-        await Plugin._patch_uniforms_batch(shader_name, {uniform_name: value})
-
-    @staticmethod
-    async def _patch_uniforms_batch(shader_name: str, params: dict):
+    def _apply_params_to_content(text: str, params: dict) -> str:
+        """Apply parameter values to shader content in memory."""
         if not params:
-            return
-
-        fx_file = Path(destination_folder) / shader_name
-        if not fx_file.exists():
-            logger.error(f"Cannot patch — {fx_file} not found")
-            return
-
-        text = fx_file.read_text(encoding="utf-8", errors="replace")
-        original_text = text
+            return text
 
         for uniform_name, value in params.items():
             # Try annotated pattern first
@@ -263,7 +250,6 @@ class Plugin:
                 m = pat_plain.search(text)
 
             if not m:
-                # logger.warning(f"Uniform {uniform_name} not found in {shader_name}")
                 continue
 
             if isinstance(value, bool):
@@ -276,10 +262,49 @@ class Plugin:
                 new_val = str(value)
 
             text = text[:m.start(2)] + new_val + text[m.end(2):]
+            
+        return text
 
-        if text != original_text:
-            fx_file.write_text(text, encoding="utf-8")
-            logger.info(f"Batch patched params in {shader_name}")
+    @staticmethod
+    def _generate_staging_shader(shader_name: str) -> str:
+        """Read source shader, patch in memory, write to fixed staging file .reshadeck.fx"""
+        # 1. Prefer pristine source from plugin dir
+        source_file = Path(shaders_folder) / shader_name
+        if not source_file.exists():
+            # Fallback to destination folder if custom shader
+            source_file = Path(destination_folder) / shader_name
+            
+        if not source_file.exists():
+            logger.error(f"Generate staging: Source {shader_name} not found")
+            return shader_name
+
+        # 2. Read content
+        text = source_file.read_text(encoding="utf-8", errors="replace")
+        
+        # 3. Apply saved params
+        params = Plugin._params.get(shader_name, {})
+        patched_text = Plugin._apply_params_to_content(text, params)
+        
+        # 4. Write to fixed staging filename: .reshadeck.fx
+        #    We must respect subfolders (e.g. SweetFX/Tech.fx -> SweetFX/.reshadeck.fx)
+        path_obj = Path(shader_name)
+        parent = path_obj.parent
+        
+        staging_filename = ".reshadeck.fx"
+        
+        if str(parent) != ".":
+            staging_rel_path = parent / staging_filename
+        else:
+            staging_rel_path = Path(staging_filename)
+            
+        full_dest_path = Path(destination_folder) / staging_rel_path
+        
+        # Ensure parent dir exists
+        full_dest_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        full_dest_path.write_text(patched_text, encoding="utf-8")
+        
+        return str(staging_rel_path)
 
     # ------------------------------------------------------------------
     # Apply shader (calls set_shader.sh)
@@ -287,17 +312,17 @@ class Plugin:
     async def apply_shader(self, force: str = "true"):
         if Plugin._enabled:
             shader = Plugin._current
-            # Patch all saved params into the .fx before applying
-            saved = Plugin._params.get(shader, {})
-            # Batch update
-            await Plugin._patch_uniforms_batch(shader, saved)
+            # Generate the fixed staging file
+            staging_file = Plugin._generate_staging_shader(shader)
+            
             Plugin.save_config()
-            logger.info("Applying shader " + shader)
+            logger.info(f"Applying shader {shader} via {staging_file}")
             try:
                 env = os.environ.copy()
                 env["LD_LIBRARY_PATH"] = ""
+                # Pass the STAGING file to the script (.reshadeck.fx)
                 ret = subprocess.run(
-                    [shaders_folder + "/set_shader.sh", shader, destination_folder, force],
+                    [shaders_folder + "/set_shader.sh", staging_file, destination_folder, force],
                     capture_output=True, env=env,
                 )
                 logger.info(ret)
@@ -306,17 +331,16 @@ class Plugin:
 
     async def set_shader(self, shader_name):
         Plugin._current = shader_name
-        
         Plugin.save_config()
+        
         if Plugin._enabled:
-            saved = Plugin._params.get(shader_name, {})
-            await Plugin._patch_uniforms_batch(shader_name, saved)
-            logger.info("Setting and applying shader " + shader_name)
+            staging_file = Plugin._generate_staging_shader(shader_name)
+            logger.info(f"Setting and applying shader {shader_name} via {staging_file}")
             try:
                 env = os.environ.copy()
                 env["LD_LIBRARY_PATH"] = ""
                 ret = subprocess.run(
-                    [shaders_folder + "/set_shader.sh", shader_name, destination_folder],
+                    [shaders_folder + "/set_shader.sh", staging_file, destination_folder],
                     capture_output=True, env=env,
                 )
                 decky_plugin.logger.info(ret)
@@ -324,15 +348,16 @@ class Plugin:
                 decky_plugin.logger.exception("Set shader")
 
     async def toggle_shader(self, shader_name):
+        staging_file = shader_name
         if shader_name != "None":
-            saved = Plugin._params.get(shader_name, {})
-            await Plugin._patch_uniforms_batch(shader_name, saved)
-        logger.info("Applying shader " + shader_name)
+            staging_file = Plugin._generate_staging_shader(shader_name)
+            
+        logger.info(f"Toggling shader {shader_name}")
         try:
             env = os.environ.copy()
             env["LD_LIBRARY_PATH"] = ""
             ret = subprocess.run(
-                [shaders_folder + "/set_shader.sh", shader_name, destination_folder],
+                [shaders_folder + "/set_shader.sh", staging_file, destination_folder],
                 capture_output=True, env=env,
             )
             decky_plugin.logger.info(ret)
@@ -487,6 +512,10 @@ class Plugin:
         
         results = []
         for p in files:
+            # Skip hidden files (including new .reshadeck- temps)
+            if p.name.startswith("."):
+                continue
+
             if not temp_pattern.match(p.name):
                 # For subfolders, we want just the filename or partial path?
                 # The frontend likely expects what set_shader expects.
@@ -798,6 +827,19 @@ class Plugin:
         await Plugin.toggle_shader(self, "None")
         
         return True
+
+    async def cleanup_legacy_files(self):
+        """Remove legacy temp files to clean up the shader directory."""
+        logger.info("Cleaning up legacy shader files...")
+        try:
+            # find . -maxdepth 1 -name "*.fx" ! -name ".reshadeck*" -delete
+            cmd = ["find", destination_folder, "-maxdepth", "1", "-type", "f", "-name", "*.fx", "!", "-name", ".reshadeck*", "-delete"]
+            subprocess.run(cmd, check=False)
+            logger.info("Legacy cleanup complete")
+            return True
+        except Exception as e:
+            logger.error(f"Legacy cleanup failed: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # Lifecycle
