@@ -285,26 +285,15 @@ class Plugin:
         params = Plugin._params.get(shader_name, {})
         patched_text = Plugin._apply_params_to_content(text, params)
         
-        # 4. Write to fixed staging filename: .reshadeck.fx
-        #    We must respect subfolders (e.g. SweetFX/Tech.fx -> SweetFX/.reshadeck.fx)
-        path_obj = Path(shader_name)
-        parent = path_obj.parent
+        # 4. Write to fixed staging filename: .reshadeck.fx at ROOT
+        #    We flatten directory structure. Most reshade shaders don't need local includes except common ones.
         
         staging_filename = ".reshadeck.fx"
-        
-        if str(parent) != ".":
-            staging_rel_path = parent / staging_filename
-        else:
-            staging_rel_path = Path(staging_filename)
-            
-        full_dest_path = Path(destination_folder) / staging_rel_path
-        
-        # Ensure parent dir exists
-        full_dest_path.parent.mkdir(parents=True, exist_ok=True)
+        full_dest_path = Path(destination_folder) / staging_filename
         
         full_dest_path.write_text(patched_text, encoding="utf-8")
         
-        return str(staging_rel_path)
+        return staging_filename
 
     # ------------------------------------------------------------------
     # Apply shader (calls set_shader.sh)
