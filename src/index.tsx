@@ -44,6 +44,7 @@ const formatDisplayName = (name: string): string =>
 const baseShader = { data: "None", label: "No Shader" } as SingleDropdownOption;
 
 const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
+    const [masterEnabled, setMasterEnabled] = useState<boolean>(true);
     const [shadersEnabled, setShadersEnabled] = useState<boolean>(false);
     const [selectedShader, setSelectedShader] = useState<DropdownOption>(baseShader);
     const [shaderList, setShaderList] = useState<string[]>([]);
@@ -86,6 +87,12 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     };
 
     const initState = async () => {
+        // 0. Get Master Switch
+        const masterResp = await serverAPI.callPluginMethod("get_master_enabled", {});
+        if (masterResp.success) {
+            setMasterEnabled(masterResp.result as boolean);
+        }
+
         // 1. Send active app info to backend
         const appid = `${Router.MainRunningApp?.appid || "Unknown"}`;
         const appname = `${Router.MainRunningApp?.display_name || "Unknown"}`;
@@ -274,6 +281,23 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
     return (
         <div>
+            <PanelSection title="Global Settings">
+                <PanelSectionRow>
+                    <ToggleField
+                        label="Master Switch"
+                        checked={masterEnabled}
+                        onChange={async (enabled: boolean) => {
+                            setMasterEnabled(enabled);
+                            await serverAPI.callPluginMethod("set_master_enabled", { enabled });
+                        }}
+                    />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                    <div style={{ fontSize: "0.85em", color: "#bbb", padding: "4px 0" }}>
+                        Disable to prevent shaders from applying. Use this if a shader is causing crashes, so you can safely change the configuration.
+                    </div>
+                </PanelSectionRow>
+            </PanelSection>
 
             <PanelSection title="Profile">
                 <PanelSectionRow>

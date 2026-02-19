@@ -56,6 +56,7 @@ class Plugin:
     _appid = "Unknown"
     _appname = "Unknown"
     _per_game = False     # True = save settings under this appid; False = use _global
+    _master_enabled = True # Global Master Switch
     _active_category = "Default" # Store the active package/category context
     _params = {}          # {shader_name: {param_name: value, ...}}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
@@ -299,6 +300,10 @@ class Plugin:
     # Apply shader (calls set_shader.sh)
     # ------------------------------------------------------------------
     async def apply_shader(self, force: str = "true"):
+        if not Plugin._master_enabled:
+            logger.info("Master disabled, skipping apply_shader")
+            return
+
         if Plugin._enabled:
             shader = Plugin._current
             # Generate the fixed staging file
@@ -322,6 +327,10 @@ class Plugin:
         Plugin._current = shader_name
         Plugin.save_config()
         
+        if not Plugin._master_enabled:
+            logger.info("Master disabled, skipping set_shader")
+            return
+
         if Plugin._enabled:
             staging_file = Plugin._generate_staging_shader(shader_name)
             logger.info(f"Setting and applying shader {shader_name} via {staging_file}")
@@ -337,6 +346,11 @@ class Plugin:
                 decky_plugin.logger.exception("Set shader")
 
     async def toggle_shader(self, shader_name):
+        # Allow disabling shader (None) even if master is disabled, but block enabling
+        if not Plugin._master_enabled and shader_name != "None":
+             logger.info("Master disabled, skipping toggle_shader")
+             return
+
         staging_file = shader_name
         if shader_name != "None":
             staging_file = Plugin._generate_staging_shader(shader_name)
@@ -383,6 +397,7 @@ class Plugin:
                 # Fall back to _global config
                 config = data.get("_global", {})
 
+            Plugin._master_enabled = data.get("master_enabled", True)
             Plugin._enabled = config.get("enabled", False)
             Plugin._current = config.get("current", "None")
             Plugin._active_category = config.get("active_category", "Default")
@@ -471,6 +486,9 @@ class Plugin:
             if Plugin._per_game:
                 entry["per_game"] = True
             data[key] = entry
+            
+            # Persist master switch at root level
+            data["master_enabled"] = Plugin._master_enabled
 
             # When per_game is True, also store a stub under the appid so
             # we know to load per-game on next visit even if key != appid
@@ -548,6 +566,20 @@ class Plugin:
         dirs = [d for d in dirs if d.lower() != "default"]
         
         return ["Default"] + sorted(dirs, key=str.lower)
+
+    async def get_master_enabled(self):
+        return Plugin._master_enabled
+
+    async def set_master_enabled(self, enabled: bool):
+        Plugin._master_enabled = enabled
+        Plugin.save_config()
+        if not enabled:
+            # Force clear
+            await Plugin.toggle_shader(self, "None")
+        else:
+            # Re-apply if actively enabled
+            if Plugin._enabled:
+                await Plugin.apply_shader(self)
 
     async def get_shader_enabled(self):
         return Plugin._enabled
