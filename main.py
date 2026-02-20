@@ -320,11 +320,16 @@ class Plugin:
                 env = os.environ.copy()
                 env["LD_LIBRARY_PATH"] = ""
                 # Pass the STAGING file to the script (.reshadeck.fx)
-                ret = subprocess.run(
-                    [shaders_folder + "/set_shader.sh", staging_file, destination_folder, force],
-                    capture_output=True, env=env,
+                proc = await asyncio.create_subprocess_exec(
+                    shaders_folder + "/set_shader.sh", staging_file, destination_folder, force,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env
                 )
-                logger.info(ret)
+                stdout, stderr = await proc.communicate()
+                logger.info(f"Apply shader result: {proc.returncode}")
+                if stdout: logger.debug(f"stdout: {stdout.decode()}")
+                if stderr: logger.error(f"stderr: {stderr.decode()}")
             except Exception:
                 logger.exception("Apply shader")
 
@@ -343,11 +348,16 @@ class Plugin:
             try:
                 env = os.environ.copy()
                 env["LD_LIBRARY_PATH"] = ""
-                ret = subprocess.run(
-                    [shaders_folder + "/set_shader.sh", staging_file, destination_folder],
-                    capture_output=True, env=env,
+                proc = await asyncio.create_subprocess_exec(
+                    shaders_folder + "/set_shader.sh", staging_file, destination_folder,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env
                 )
-                decky_plugin.logger.info(ret)
+                stdout, stderr = await proc.communicate()
+                decky_plugin.logger.info(f"Set shader result: {proc.returncode}")
+                if stdout: decky_plugin.logger.debug(f"stdout: {stdout.decode()}")
+                if stderr: decky_plugin.logger.error(f"stderr: {stderr.decode()}")
             except Exception:
                 decky_plugin.logger.exception("Set shader")
 
@@ -365,11 +375,16 @@ class Plugin:
         try:
             env = os.environ.copy()
             env["LD_LIBRARY_PATH"] = ""
-            ret = subprocess.run(
-                [shaders_folder + "/set_shader.sh", staging_file, destination_folder],
-                capture_output=True, env=env,
+            proc = await asyncio.create_subprocess_exec(
+                shaders_folder + "/set_shader.sh", staging_file, destination_folder,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
-            decky_plugin.logger.info(ret)
+            stdout, stderr = await proc.communicate()
+            decky_plugin.logger.info(f"Toggle shader result: {proc.returncode}")
+            if stdout: decky_plugin.logger.debug(f"stdout: {stdout.decode()}")
+            if stderr: decky_plugin.logger.error(f"stderr: {stderr.decode()}")
         except Exception:
             decky_plugin.logger.exception("Toggle shader")
 
@@ -487,7 +502,6 @@ class Plugin:
         """Write configuration to disk immediately."""
         try:
             Path(os.path.dirname(config_file)).mkdir(parents=True, exist_ok=True)
-            data = {}
             data = {}
             if os.path.exists(config_file):
                 try:
@@ -741,14 +755,19 @@ class Plugin:
 
     async def get_current_effect(self):
         try:
-            result = subprocess.run(
-                ['xprop', '-root', 'GAMESCOPE_RESHADE_EFFECT'],
-                env={"DISPLAY": ":0"},
-                capture_output=True,
-                text=True,
+            env = {"DISPLAY": ":0"}
+            proc = await asyncio.create_subprocess_exec(
+                'xprop', '-root', 'GAMESCOPE_RESHADE_EFFECT',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
-            if result.returncode == 0 and "=" in result.stdout:
-                effect = result.stdout.split('=', 1)[1].strip().strip('"')
+            stdout, stderr = await proc.communicate()
+            
+            output = stdout.decode() if stdout else ""
+            
+            if proc.returncode == 0 and "=" in output:
+                effect = output.split('=', 1)[1].strip().strip('"')
                 return {"effect": effect}
             else:
                 return {"effect": "None"}
@@ -782,15 +801,15 @@ class Plugin:
         except Exception:
             pass
 
-    @staticmethod
-    def check_crash_loop():
-        # This legacy check is less relevant now that we check logs directly,
-        # but we keep it as a secondary heuristic or cleanup.
-        data = Plugin._read_crash_data()
-        count = data["count"]
-        # If we just detected a crash via logs, we might have already disabled it.
-        # But this method is called on startup.
-        return False
+    # @staticmethod
+    # def check_crash_loop():
+    #     # This legacy check is less relevant now that we check logs directly,
+    #     # but we keep it as a secondary heuristic or cleanup.
+    #     # data = Plugin._read_crash_data()
+    #     # count = data["count"]
+    #     # If we just detected a crash via logs, we might have already disabled it.
+    #     # But this method is called on startup.
+    #     return False
 
     @staticmethod
     async def mark_stable():
@@ -882,8 +901,6 @@ class Plugin:
 
             # Find the most recent file
             latest_file = max(files, key=os.path.getmtime)
-            # Find the most recent file
-            latest_file = max(files, key=os.path.getmtime)
             latest_timestamp = latest_file.stat().st_mtime
             
             if min_timestamp and latest_timestamp < min_timestamp:
@@ -902,20 +919,7 @@ class Plugin:
             if latest_timestamp <= last_known_timestamp:
                 return False
 
-            # 2. Check if the crash is RECENT (within the last 3 minutes)
-            # If the crash happened > 3 minutes ago, we ignore it to avoid alerts on old crashes.
-            current_time = time.time()
-            if (current_time - latest_timestamp) > 180: # 180 seconds = 3 minutes
-                # It's an old crash that we haven't seen before? Or maybe we just restarted.
-                # In any case, we don't want to disrupt the user for an old event.
-                # However, we DO want to update our "last_known" so we don't check this file again.
-                # But wait, if we update last_known without alerting, we suppress it forever. That's fine.
-                
-                # Let's just update the last known timestamp to this "new but old" crash 
-                # effectively "acknowledging" it without action.
-                Plugin._write_crash_data(crash_data.get("count", 0), str(latest_timestamp))
-                logger.debug(f"Ignoring old crash from {latest_timestamp} (older than 3m). Updated last_known_timestamp.")
-                return False
+
 
             logger.error(f"NEW CRASH DETECTED. File: {latest_file.name}, Timestamp: {latest_timestamp}. Disabling Master Switch.")
                 
@@ -1000,10 +1004,26 @@ class Plugin:
         """Remove legacy temp files to clean up the shader directory."""
         logger.info("Cleaning up legacy shader files...")
         try:
-            # find . -maxdepth 1 -name "*.fx" ! -name ".reshadeck*" -delete
-            cmd = ["find", destination_folder, "-maxdepth", "1", "-type", "f", "-name", "*.fx", "!", "-name", ".reshadeck*", "-delete"]
-            subprocess.run(cmd, check=False)
-            logger.info("Legacy cleanup complete")
+            # Pattern: ShaderName_Random6Chars.fx
+            # e.g. "Technicolor_Abc123.fx"
+            # This avoids deleting "Technicolor.fx" or ".reshadeck.active..."
+            legacy_pattern = re.compile(r"^.+_[A-Za-z0-9]{6}\.fx$")
+            
+            if not os.path.exists(destination_folder):
+                return True
+
+            count = 0
+            for filename in os.listdir(destination_folder):
+                if legacy_pattern.match(filename):
+                    full_path = os.path.join(destination_folder, filename)
+                    try:
+                        os.remove(full_path)
+                        count += 1
+                        logger.debug(f"Deleted legacy file: {filename}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {filename}: {e}")
+
+            logger.info(f"Legacy cleanup complete. Removed {count} files.")
             return True
         except Exception as e:
             logger.error(f"Legacy cleanup failed: {e}")
@@ -1021,7 +1041,7 @@ class Plugin:
             decky_plugin.logger.info("Initialized")
             decky_plugin.logger.info(str(await Plugin.get_shader_list(self)))
             Plugin.load_config()
-            Plugin.check_crash_loop()
+            # Plugin.check_crash_loop()
             if Plugin._enabled:
                 await asyncio.sleep(5)
                 await Plugin.apply_shader(self)
