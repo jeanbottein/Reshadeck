@@ -420,10 +420,8 @@ class Plugin:
                 Plugin.save_config()
                 logger.info("Migrated old contrast/sharpness config to new params format")
 
-            if Plugin._master_enabled and not skip_crash_check: 
-                # Check for crash on every load (game switch, etc)
-                if Plugin._check_coredump_for_crash(revert_unsaved=False):
-                    Plugin._crash_detected = True
+            if not skip_crash_check: 
+                Plugin._check_coredump_for_crash(revert_unsaved=False)
 
         except Exception as e:
             logger.error(f"Failed to read config: {e}")
@@ -432,6 +430,7 @@ class Plugin:
     async def _save_config_delayed():
         # Capture the appid that invoked the save
         invoking_appid = Plugin._appid
+        start_time = time.time()
         try:
             # Wait 10 seconds before saving
             await asyncio.sleep(CONFIG_SAVE_DELAY)
@@ -448,7 +447,7 @@ class Plugin:
             # 1. Revert config (discarding THIS pending save)
             # 2. Disable Master Switch
             # 3. Save the reverted+disabled state immediately
-            if Plugin._check_coredump_for_crash(revert_unsaved=True):
+            if Plugin._check_coredump_for_crash(revert_unsaved=True, min_timestamp=start_time):
                  logger.info("Crash detected during save delay. Aborting save of unsafe config.")
                  Plugin._save_task = None
                  return
@@ -855,7 +854,7 @@ class Plugin:
             logger.error(f"Failed to install resources: {e}")
 
     @staticmethod
-    def _check_coredump_for_crash(revert_unsaved=False):
+    def _check_coredump_for_crash(revert_unsaved=False, min_timestamp=None):
         """Check for recent gamescope crashes by looking for coredump files.
         
         Args:
@@ -883,7 +882,12 @@ class Plugin:
 
             # Find the most recent file
             latest_file = max(files, key=os.path.getmtime)
+            # Find the most recent file
+            latest_file = max(files, key=os.path.getmtime)
             latest_timestamp = latest_file.stat().st_mtime
+            
+            if min_timestamp and latest_timestamp < min_timestamp:
+                return False
             
             # Read last known crash timestamp
             crash_data = Plugin._read_crash_data()
@@ -926,9 +930,9 @@ class Plugin:
             # 1. Update crash data
             Plugin._write_crash_data(crash_data.get("count", 0) + 1, str(latest_timestamp))
                 
-                
             # 2. Disable Master Switch
             Plugin._master_enabled = False
+            Plugin._crash_detected = True
             
             # 3. Force save config immediately
             Plugin._save_config_immediate()
@@ -980,6 +984,7 @@ class Plugin:
         Plugin._active_category = "Default"
         Plugin._params = {}
         Plugin._params_meta = {}
+        Plugin._crash_detected = False
         
         # Cancel any pending save
         if Plugin._save_task:
@@ -1023,5 +1028,6 @@ class Plugin:
             
             # Start stability timer
             asyncio.create_task(Plugin.mark_stable())
+
         except Exception:
             decky_plugin.logger.exception("main")
