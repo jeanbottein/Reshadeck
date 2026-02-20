@@ -17,8 +17,8 @@ textures_folder = decky_plugin.DECKY_PLUGIN_DIR + "/textures"
 config_file = decky_plugin.DECKY_PLUGIN_SETTINGS_DIR + "/config.json"
 crash_file = decky_plugin.DECKY_PLUGIN_SETTINGS_DIR + "/crash.json"
 
-CONFIG_SAVE_DELAY = 1 # Seconds to wait before saving config (UI debounce)
-CRASH_DETECTION_WINDOW = "3 minutes ago" # Time window to look back in logs for gamescope crashes
+CONFIG_SAVE_DELAY = 5 # Seconds to wait before saving config (UI debounce & crash check)
+
 
 # ---------------------------------------------------------------------------
 # Regex patterns for parsing .fx uniform parameters
@@ -313,7 +313,8 @@ class Plugin:
             # Generate the fixed staging file
             staging_file = Plugin._generate_staging_shader(shader)
             
-            Plugin.save_config()
+            # Plugin.save_config() # Delayed save to catch crashes
+            Plugin.save_config_debounced()
             logger.info(f"Applying shader {shader} via {staging_file}")
             try:
                 env = os.environ.copy()
@@ -327,9 +328,10 @@ class Plugin:
             except Exception:
                 logger.exception("Apply shader")
 
-    async def set_shader(self, shader_name):
+    async def set_shader(self, shader_name: str):
         Plugin._current = shader_name
-        Plugin.save_config()
+        # Plugin.save_config() # Delayed save
+        Plugin.save_config_debounced()
         
         if not Plugin._master_enabled:
             logger.info("Master disabled, skipping set_shader")
@@ -383,7 +385,7 @@ class Plugin:
         return Plugin._appid if Plugin._per_game else "_global"
 
     @staticmethod
-    def load_config():
+    def load_config(skip_crash_check=False):
         try:
             if not os.path.exists(config_file):
                 return
@@ -418,9 +420,9 @@ class Plugin:
                 Plugin.save_config()
                 logger.info("Migrated old contrast/sharpness config to new params format")
 
-            if Plugin._master_enabled : 
+            if Plugin._master_enabled and not skip_crash_check: 
                 # Check for crash on every load (game switch, etc)
-                if Plugin._check_system_logs_for_crash():
+                if Plugin._check_coredump_for_crash(revert_unsaved=False):
                     Plugin._crash_detected = True
 
         except Exception as e:
@@ -440,6 +442,16 @@ class Plugin:
                 decky_plugin.logger.info("AppID changed during save delay. Aborting save.")
                 Plugin._save_task = None
                 return
+
+            # Check for crash before saving.
+            # If a crash is detected, _check_coredump_for_crash will:
+            # 1. Revert config (discarding THIS pending save)
+            # 2. Disable Master Switch
+            # 3. Save the reverted+disabled state immediately
+            if Plugin._check_coredump_for_crash(revert_unsaved=True):
+                 logger.info("Crash detected during save delay. Aborting save of unsafe config.")
+                 Plugin._save_task = None
+                 return
 
             Plugin._save_config_immediate()
             Plugin._save_task = None
@@ -843,53 +855,88 @@ class Plugin:
             logger.error(f"Failed to install resources: {e}")
 
     @staticmethod
-    def _check_system_logs_for_crash():
-        """Check journalctl for recent gamescope crashes using timestamps."""
+    def _check_coredump_for_crash(revert_unsaved=False):
+        """Check for recent gamescope crashes by looking for coredump files.
+        
+        Args:
+            revert_unsaved (bool): If True, reload config from disk before saving the crash state.
+                                   This is used when a crash is detected during the save delay window,
+                                   effectively discarding the unsaved changes that likely caused the crash.
+        """
         # Only check if the master switch is ON. If it's already OFF, we don't need to do anything.
         if not Plugin._master_enabled:
             return False
 
         try:
-            # Check for gamescope crash in last CRASH_DETECTION_WINDOW
-            # output=short-iso gives us "YYYY-MM-DDTHH:MM:SS+TZ"
-            # We take the LAST line only.
-            cmd = f"journalctl --user --since '{CRASH_DETECTION_WINDOW}' --output=short-iso | grep -iE 'gamescope.*dumped core|Process.*gamescope.*dumped core' | tail -n 1"
-            ret = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            
-            line = ret.stdout.strip()
-            if not line:
+            # Path to coredump directory
+            coredump_path = Path("/var/lib/systemd/coredump")
+            if not coredump_path.exists():
+                logger.error(f"Coredump directory not found at {coredump_path}")
                 return False
-                
-            # Example line: "2026-02-19T22:13:50-05:00 steamdeck systemd-coredump[18338]: Process 16484..."
-            # Extract timestamp (first space-separated token)
-            parts = line.split(" ")
-            if not parts:
-                return False
+
+            # Find all files matching the pattern
+            # Using rglob to be safe, but they should be in the root of that dir
+            files = list(coredump_path.glob("core.gamescope-wl.*.zst"))
             
-            crash_timestamp = parts[0]
+            if not files:
+                return False
+
+            # Find the most recent file
+            latest_file = max(files, key=os.path.getmtime)
+            latest_timestamp = latest_file.stat().st_mtime
             
             # Read last known crash timestamp
             crash_data = Plugin._read_crash_data()
-            last_known_timestamp = crash_data.get("last_timestamp", "")
+            last_known_timestamp_str = crash_data.get("last_timestamp", "0")
             
-            # String comparison of ISO timestamps works for "is newer" check
-            # if they are in the same timezone format. journalctl output should be consistent.
-            if crash_timestamp > last_known_timestamp:
-                logger.error(f"NEW CRASH DETECTED at {crash_timestamp}. Disabling Master Switch.")
+            try:
+                last_known_timestamp = float(last_known_timestamp_str)
+            except ValueError:
+                last_known_timestamp = 0.0
+
+            # 1. Check if the crash is new (newer than our last known crash)
+            if latest_timestamp <= last_known_timestamp:
+                return False
+
+            # 2. Check if the crash is RECENT (within the last 3 minutes)
+            # If the crash happened > 3 minutes ago, we ignore it to avoid alerts on old crashes.
+            current_time = time.time()
+            if (current_time - latest_timestamp) > 180: # 180 seconds = 3 minutes
+                # It's an old crash that we haven't seen before? Or maybe we just restarted.
+                # In any case, we don't want to disrupt the user for an old event.
+                # However, we DO want to update our "last_known" so we don't check this file again.
+                # But wait, if we update last_known without alerting, we suppress it forever. That's fine.
                 
-                # 1. Update crash data
-                Plugin._write_crash_data(crash_data.get("count", 0) + 1, crash_timestamp)
+                # Let's just update the last known timestamp to this "new but old" crash 
+                # effectively "acknowledging" it without action.
+                Plugin._write_crash_data(crash_data.get("count", 0), str(latest_timestamp))
+                logger.debug(f"Ignoring old crash from {latest_timestamp} (older than 3m). Updated last_known_timestamp.")
+                return False
+
+            logger.error(f"NEW CRASH DETECTED. File: {latest_file.name}, Timestamp: {latest_timestamp}. Disabling Master Switch.")
                 
-                # 2. Disable Master Switch
-                Plugin._master_enabled = False
+            if revert_unsaved:
+                logger.info("Reverting to last saved config before disabling Master Switch.")
+                try:
+                    # Load config from disk, skipping crash check to avoid recursion
+                    Plugin.load_config(skip_crash_check=True)
+                except Exception as e:
+                    logger.error(f"Failed to revert config: {e}")
+
+            # 1. Update crash data
+            Plugin._write_crash_data(crash_data.get("count", 0) + 1, str(latest_timestamp))
                 
-                # 3. Force save config immediately
-                Plugin._save_config_immediate()
                 
-                return True
+            # 2. Disable Master Switch
+            Plugin._master_enabled = False
+            
+            # 3. Force save config immediately
+            Plugin._save_config_immediate()
+            
+            return True
                 
         except Exception as e:
-            logger.error(f"Error checking logs: {e}")
+            logger.error(f"Error checking coredumps: {e}")
         
         return False
 

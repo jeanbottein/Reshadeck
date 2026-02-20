@@ -178,10 +178,23 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     useEffect(() => {
         let lastAppId = `${Router.MainRunningApp?.appid || "Unknown"}`;
         const interval = setInterval(async () => {
+            // 1. Check game change
             const appid = `${Router.MainRunningApp?.appid || "Unknown"}`;
             if (appid !== lastAppId) {
                 lastAppId = appid;
                 await initState();
+            }
+
+            // 2. Poll for crash status
+            const crashResp = await serverAPI.callPluginMethod("get_crash_detected", {});
+            if (crashResp.success) {
+                setCrashDetected(crashResp.result as boolean);
+            }
+
+            // 3. Poll for master switch status (incase it was disabled by backend due to crash)
+            const masterResp = await serverAPI.callPluginMethod("get_master_enabled", {});
+            if (masterResp.success) {
+                setMasterEnabled(masterResp.result as boolean);
             }
         }, 5000);
         return () => clearInterval(interval);
