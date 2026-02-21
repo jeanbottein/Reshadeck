@@ -9,7 +9,6 @@ cleanup() {
 
 FXNAME="$1"
 SHADER_DIR="$2"
-FORCE="${3:-true}"
 
 if [ "$FXNAME" = "None" ] || [ -z "$FXNAME" ]; then
     DISPLAY=:0 xprop -root -remove GAMESCOPE_RESHADE_EFFECT
@@ -20,25 +19,6 @@ if [ ! -f "$SHADER_DIR/$FXNAME" ]; then
     echo "Shader file $FXNAME not found in $SHADER_DIR"
     DISPLAY=:0 xprop -root -remove GAMESCOPE_RESHADE_EFFECT
     exit 1
-fi
-
-# Check current state if FORCE is false
-if [ "$FORCE" = "false" ]; then
-    CURRENT_VAL=$(DISPLAY=:0 xprop -root GAMESCOPE_RESHADE_EFFECT | cut -d '=' -f 2 | tr -d ' "')
-    
-    # Check if current value matches our pattern (.reshadeck.active.*.fx)
-    if [[ "$CURRENT_VAL" == .reshadeck.active.*.fx ]]; then
-        CURRENT_FILE="$SHADER_DIR/$CURRENT_VAL"
-        if [ -f "$CURRENT_FILE" ]; then
-            # Just overwrite the existing active file
-            echo "Updating existing active shader $CURRENT_VAL"
-            if cp "$SHADER_DIR/$FXNAME" "$CURRENT_FILE"; then
-                exit 0
-            else
-                echo "Failed to update active file, falling back to full apply"
-            fi
-        fi
-    fi
 fi
 
 # Generate new random active filename
