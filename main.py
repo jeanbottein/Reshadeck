@@ -61,6 +61,7 @@ class Plugin:
     _active_category = "Default" # Store the active package/category context
     _params = {}          # {shader_name: {param_name: value, ...}}
     _params_meta = {}     # cache: {shader_name: [param_dict, ...]}
+    _first_apply_done = False
     _crash_check_done = False
     _crash_detected = False
 
@@ -337,12 +338,15 @@ class Plugin:
                 Plugin._master_enabled = False
                 Plugin._crash_detected = True
                 
-                # Restore previous safe state
-                Plugin._restore_state(previous_state)
-                
-                # Apply the restored (safe) state back to the system
                 plugin_instance = Plugin()
-                await plugin_instance.apply_shader(force="true", check_crash=False)
+                # Restore previous safe state
+                if previous_state is not None:
+                     Plugin._restore_state(previous_state)
+                     # Apply the restored (safe) state back to the system
+                     await plugin_instance.apply_shader(force="true", check_crash=False)
+                else:
+                     Plugin._save_config_immediate()
+                     await plugin_instance.toggle_shader("None")
                 
         except asyncio.CancelledError:
             pass
@@ -352,7 +356,7 @@ class Plugin:
     # ------------------------------------------------------------------
     # Apply shader (calls set_shader.sh)
     # ------------------------------------------------------------------
-    async def apply_shader(self, check_crash: bool = False, previous_state: dict = None):
+    async def apply_shader(self, force: str = "true", check_crash: bool = False, previous_state: dict = None):
         if not Plugin._master_enabled:
             logger.info("Master disabled, skipping apply_shader")
             return
@@ -370,7 +374,7 @@ class Plugin:
             env["LD_LIBRARY_PATH"] = ""
             # Pass the STAGING file to the script (.reshadeck.fx)
             proc = await asyncio.create_subprocess_exec(
-                shaders_folder + "/set_shader.sh", staging_file, destination_folder,
+                shaders_folder + "/set_shader.sh", staging_file, destination_folder, force,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env
@@ -516,7 +520,7 @@ class Plugin:
             # Because this is debounce, we won't do full reversion here to avoid complex state jumping.
             # The general crash monitor works better on explicit set_shader/master switch calls.
             plugin_instance = Plugin()
-            await plugin_instance.apply_shader(check_crash=False)
+            await plugin_instance.apply_shader(force="false", check_crash=False)
             
             Plugin._save_task = None
         except asyncio.CancelledError:
@@ -675,8 +679,7 @@ class Plugin:
             # Force clear
             await Plugin.toggle_shader(self, "None")
         else:
-            # Re-apply if actively enabled
-            await Plugin.apply_shader(self, check_crash=True, previous_state=previous_state)
+            await Plugin.apply_shader(self, force="true", check_crash=True, previous_state=previous_state)
 
     async def get_current_shader(self):
         return Plugin._current
@@ -771,6 +774,7 @@ class Plugin:
 
         previous_state = Plugin._get_current_state()
         prevCurrent = Plugin._current
+        prevMaster = previous_state.get("master_enabled", True)
         # Capture parameters of the active shader to detect changes
         prevParams = {}
         if prevCurrent in Plugin._params:
@@ -785,9 +789,15 @@ class Plugin:
         if Plugin._current in Plugin._params:
              currentParams = Plugin._params[Plugin._current]
 
-        # If shader changed OR parameters changed, re-apply
-        if (Plugin._current != prevCurrent) or (currentParams != prevParams):
-            await Plugin.apply_shader(self, check_crash=True, previous_state=previous_state)
+        master_changed = Plugin._master_enabled != prevMaster
+
+        # If shader changed OR parameters changed OR master switched OR hasn't applied yet, re-apply
+        if (Plugin._current != prevCurrent) or (currentParams != prevParams) or master_changed or not Plugin._first_apply_done:
+            Plugin._first_apply_done = True
+            if not Plugin._master_enabled:
+                await Plugin.toggle_shader(self, "None")
+            else:
+                await Plugin.apply_shader(self, force="false", check_crash=True, previous_state=None)
 
 
     async def get_current_effect(self):
