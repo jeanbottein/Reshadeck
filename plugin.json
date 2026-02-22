@@ -1,6 +1,6 @@
 {
   "name": "Reshadeck+",
-  "author": "Jariullah Safi, Jean Bottein",
+  "author": "Jariullah Safi, mspeedo, Jean Bottein",
   "flags": [
     "debug"
   ],
@@ -9,6 +9,6 @@
       "control"
     ],
     "description": "A plugin for loading reshade shaders on steam deck",
-    "image": "https://github.com/jeanbottein/Reshadeck/raw/main/reshadeck.png"
+    "image": "https://github.com/jeanbottein/ReshadeckPlus/raw/main/assets/preview.png"
   }
 }

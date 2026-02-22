@@ -8,7 +8,7 @@ Reshade Shader Loader for Decky Plugin Loader for the handheld Steam Game Loader
 More shaders can be added at the `~/.local/share/gamescope/reshade/Shaders` folder such that the `.fx` files are in the 
 root of the `Shaders` folder. Then you can pick and apply the shader using the plugin.
 
-![Example Screenshot](reshadeck.png)
+![Example Screenshot](assets/reshadeck.png)
 
 # Installation
 
@@ -28,12 +28,6 @@ root of the `Shaders` folder. Then you can pick and apply the shader using the p
 - When not in a game, the whole OS will have the shader applied
 - Not all features of reshade are supported
 - Some shaders can cause the Deck to crash
-
-# Crash Prevention
-This plugin includes two mechanisms to prevent crash loops caused by bad shaders or configurations:
-
-1.  **Immediate Crash Protection**: When you select a new shader or change parameters, the settings are not saved to disk for **5 seconds**. If your system crashes immediately (e.g., due to a bad shader), the plugin will revert to the previous safe configuration on reboot.
-2.  **Persistent Crash Loop Detection**: If the plugin detects **2 consecutive system crashes** while it is enabled, it will automatically **disable itself** to ensure you can boot back into Gaming Mode safely. This protects against global shader crashing the system.
 
 # A note on Deck OLED Fringing Patterns
 The subpixel pattern of the Steam Deck OLED (Samsung screen at least), leads to some fringing that is visible to a small minority of people.
