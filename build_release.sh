@@ -19,7 +19,6 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-AUTHOR="jeanbottein"
 ZIP_NAME="${PLUGIN_NAME,,}-${VERSION}.zip"
 
 echo "Starting build process for ${ZIP_NAME}..."
@@ -56,7 +55,6 @@ cp -R -L \
     dist \
     shaders \
     textures \
-    external \
     main.py \
     utils \
     plugin.json \
@@ -74,6 +72,7 @@ find "$STAGING_DIR" -type d -name "__pycache__" -exec rm -rf {} +
 # 4. Create the zip file
 echo "Creating zip archive..."
 current_dir=$(pwd)
+rm -f "$current_dir/$ZIP_NAME" >/dev/null 2>&1
 cd "$TEMP_DIR"
 zip -r "$current_dir/$ZIP_NAME" "$PLUGIN_NAME"
 cd "$current_dir"

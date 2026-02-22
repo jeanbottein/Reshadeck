@@ -18,7 +18,7 @@ Reshade Shader Loader for Decky Plugin Loader for the handheld Steam Game Loader
 More shaders can be added at the `~/.local/share/gamescope/reshade/Shaders` folder such that the `.fx` files are in the 
 root of the `Shaders` folder. Then you can pick and apply the shader using the plugin.
 
-![Example Screenshot](assets/reshadeck.png)
+![Example Screenshot](assets/preview.jpg)
 
 # Installation
 
