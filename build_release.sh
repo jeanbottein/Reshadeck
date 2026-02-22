@@ -24,6 +24,10 @@ ZIP_NAME="${PLUGIN_NAME,,}-${VERSION}.zip"
 
 echo "Starting build process for ${ZIP_NAME}..."
 
+# 0. Ensure submodules are up to date
+echo "Updating submodules..."
+git submodule update --init --recursive
+
 # 1. Build the frontend
 echo "Building frontend..."
 if ! command -v pnpm &> /dev/null; then
@@ -52,12 +56,15 @@ cp -R -L \
     dist \
     shaders \
     textures \
+    external \
     main.py \
     utils \
     plugin.json \
     package.json \
     LICENSE \
     README.md \
+    reshadeck.png \
+    assets \
     "$STAGING_DIR"
 
 # Remove source maps and python caches if present
