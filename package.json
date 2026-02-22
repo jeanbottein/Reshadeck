@@ -1,6 +1,6 @@
 {
-  "name": "reshadeck",
-  "version": "1.5.0",
+  "name": "reshadeckplus",
+  "version": "0.0.0",
   "description": "A plugin for loading reshade plugins on steam deck",
   "scripts": {
     "build": "shx rm -rf dist && rollup -c",
@@ -9,21 +9,21 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeanbottein/Reshadeck"
+    "url": "git+https://github.com/jeanbottein/ReshadeckPlus"
   },
   "keywords": [
     "decky",
     "plugin",
-    "plugin-template",
     "steam-deck",
-    "deck"
+    "deck",
+    "reshade"
   ],
-  "author": "jeanbottein",
+  "author": "Jean Bottein",
   "license": "GPL 3",
   "bugs": {
-    "url": "https://github.com/jeanbottein/Reshadeck/issues"
+    "url": "https://github.com/jeanbottein/ReshadeckPlus/issues"
   },
-  "homepage": "https://github.com/jeanbottein/Reshadeck#readme",
+  "homepage": "https://github.com/jeanbottein/ReshadeckPlus#readme",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^21.1.0",
     "@rollup/plugin-json": "^4.1.0",

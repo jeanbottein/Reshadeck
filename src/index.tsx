@@ -8,12 +8,15 @@ import {
     ServerAPI,
     staticClasses,
     Dropdown,
+    DropdownItem,
     DropdownOption,
     SingleDropdownOption,
-    SliderField
+    SliderField,
+    ConfirmModal,
+    showModal
 } from "decky-frontend-lib";
-import { VFC, useState, useEffect, useRef } from "react";
-import { RiTvLine } from "react-icons/ri";
+import { VFC, useState, useEffect, useRef, useMemo } from "react";
+import { RiTvLine, RiArrowDownSLine, RiArrowRightSLine, RiSeparator } from "react-icons/ri";
 
 declare global {
     interface Window {
@@ -40,21 +43,41 @@ interface ShaderParam {
 const formatDisplayName = (name: string): string =>
     name.replace(/\.fx$/i, "").replace(/_/g, " ").replace(/\s*\[.*?\]\s*$/, "").trim();
 
+const baseShader = { data: "None", label: "No Shader" } as SingleDropdownOption;
+
 const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
-    const baseShader = { data: "None", label: "No Shader" } as SingleDropdownOption;
-    const [shadersEnabled, setShadersEnabled] = useState<boolean>(false);
+    const [masterEnabled, setMasterEnabled] = useState<boolean>(true);
     const [selectedShader, setSelectedShader] = useState<DropdownOption>(baseShader);
-    const [shaderOptions, setShaderOptions] = useState<DropdownOption[]>([baseShader]);
+    const [shaderList, setShaderList] = useState<string[]>([]);
     const [currentGameName, setCurrentGameName] = useState<string>("Unknown");
+
+    const [crashDetected, setCrashDetected] = useState<boolean>(false);
+    const [oldVersionExists, setOldVersionExists] = useState<boolean>(false);
+
+    // Packages
+    const [packageOptions, setPackageOptions] = useState<DropdownOption[]>([]);
+    const [selectedPackage, setSelectedPackage] = useState<DropdownOption>({ data: "Default", label: "Default" });
+
     const [shaderParams, setShaderParams] = useState<ShaderParam[]>([]);
     const paramTimeouts = useRef<{ [key: string]: number }>({});
-    const [applyDisabled, setApplyDisabled] = useState(false);
     const [perGame, setPerGame] = useState<boolean>(false);
+    const [infoExpanded, setInfoExpanded] = useState<boolean>(true);
 
-    const getShaderOptions = (shaderList: string[]): DropdownOption[] => [
-        baseShader,
-        ...shaderList.map(s => ({ data: s, label: formatDisplayName(s) } as SingleDropdownOption))
-    ];
+    const shaderDropdownOptions = useMemo((): DropdownOption[] => {
+        const options: DropdownOption[] = [
+            { label: "No Shader", data: -1 }
+        ];
+        shaderList.forEach((s, index) => {
+            let label = formatDisplayName(s);
+            // If inside a package/subfolder, show only the filename in the dropdown
+            if (s.includes("/")) {
+                const parts = s.split("/");
+                label = formatDisplayName(parts[parts.length - 1]);
+            }
+            options.push({ label: label, data: index });
+        });
+        return options;
+    }, [shaderList]);
 
     const fetchShaderParams = async () => {
         const resp = await serverAPI.callPluginMethod("get_shader_params", {});
@@ -66,6 +89,29 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
     };
 
     const initState = async () => {
+        const oldResp = await serverAPI.callPluginMethod("get_old_version_exists", {});
+        let oldExists = false;
+        if (oldResp.success) {
+            oldExists = oldResp.result as boolean;
+            setOldVersionExists(oldExists);
+        }
+
+        if (oldExists) {
+            await serverAPI.callPluginMethod("set_master_enabled", { enabled: false });
+        }
+
+        // 0. CHECK FOR CRASH
+        const crashResp = await serverAPI.callPluginMethod("get_crash_detected", {});
+        if (crashResp.success) {
+            setCrashDetected(crashResp.result as boolean);
+        }
+
+        // 0. Get Master Switch
+        const masterResp = await serverAPI.callPluginMethod("get_master_enabled", {});
+        if (masterResp.success) {
+            setMasterEnabled(masterResp.result as boolean);
+        }
+
         // 1. Send active app info to backend
         const appid = `${Router.MainRunningApp?.appid || "Unknown"}`;
         const appname = `${Router.MainRunningApp?.display_name || "Unknown"}`;
@@ -76,30 +122,51 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         setCurrentGameName(info.appname);
         setPerGame(info.per_game);
 
-        // 3. Get shader list
-        const shaderList = (await serverAPI.callPluginMethod("get_shader_list", {})).result as string[];
-        const options = getShaderOptions(shaderList);
-        setShaderOptions(options);
-
-        // 4. Get enabled status
-        let enabledResp = await serverAPI.callPluginMethod("get_shader_enabled", {});
-        let isEnabled: boolean = enabledResp.result === true || enabledResp.result === "true";
-        setShadersEnabled(isEnabled);
+        // 3. Get packages
+        // 3. Get packages
+        const pkgResp = await serverAPI.callPluginMethod("get_shader_packages", {});
+        const packages = (pkgResp.success && Array.isArray(pkgResp.result))
+            ? (pkgResp.result as string[])
+            : ["Default"];
+        const pkgOptions = packages.map(p => ({ data: p, label: p } as SingleDropdownOption));
+        setPackageOptions(pkgOptions);
 
         // 5. Get current shader
         let curr = await serverAPI.callPluginMethod("get_current_shader", {});
-        let targetData = curr.result;
+        let targetData = curr.result as string;
         if (targetData === "0") targetData = "None";
 
-        // Find the matched option to ensure referential equality, which fixes the dropdown scroll position
-        const matchedOption = options.find(o => o.data === targetData);
-        if (matchedOption) {
-            setSelectedShader(matchedOption);
+        // Determine package from current shader
+        // Determine package logic:
+        // 1. If shader path has '/', use folder name
+        // 2. If shader != None, assume Default (or we'd need to search all)
+        // 3. If shader == None, use persisted active_category from backend
+        let initialPackage = info.active_category || "Default";
+
+        if (targetData && targetData !== "None" && targetData.includes("/")) {
+            initialPackage = targetData.split("/")[0];
+        } else if (targetData && targetData !== "None") {
+            initialPackage = "Default";
+        }
+
+        // Select package
+        // Important: use find() on the NEW pkgOptions to get the exact object reference
+        const matchedPkg = pkgOptions.find(p => p.data === initialPackage) || pkgOptions[0];
+        setSelectedPackage(matchedPkg);
+
+        // Get shader list for this package
+        const fetchedShaderList = (await serverAPI.callPluginMethod("get_shader_list", { category: initialPackage })).result as string[];
+        setShaderList(fetchedShaderList || []);
+
+        if (targetData === "None") {
+            setSelectedShader(baseShader);
         } else {
+            // Simplified logic as we rely on indices for dropdown now
+            const labelRaw = targetData.includes("/") ? targetData.split("/").pop()! : targetData;
             setSelectedShader({
                 data: targetData,
-                label: targetData === "None" ? "None" : formatDisplayName(targetData as string)
-            } as SingleDropdownOption);
+                label: formatDisplayName(labelRaw)
+            });
         }
 
         // 6. Fetch params
@@ -111,14 +178,46 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         initState();
     }, []);
 
+    useEffect(() => {
+        const stored = localStorage.getItem("reshadeck-info-expanded");
+        if (stored !== null) {
+            setInfoExpanded(stored === "true");
+        }
+    }, []);
+
     // --- Poll for game changes and re-init state ---
     useEffect(() => {
         let lastAppId = `${Router.MainRunningApp?.appid || "Unknown"}`;
         const interval = setInterval(async () => {
+            // 1. Check game change
             const appid = `${Router.MainRunningApp?.appid || "Unknown"}`;
             if (appid !== lastAppId) {
                 lastAppId = appid;
                 await initState();
+            }
+
+            // 2. Poll for crash status and old version
+            const crashResp = await serverAPI.callPluginMethod("get_crash_detected", {});
+            if (crashResp.success) {
+                setCrashDetected(crashResp.result as boolean);
+            }
+
+            const oldResp = await serverAPI.callPluginMethod("get_old_version_exists", {});
+            let oldExists = false;
+            if (oldResp.success) {
+                oldExists = oldResp.result as boolean;
+                setOldVersionExists(oldExists);
+            }
+
+            // 3. Poll for master switch status (incase it was disabled by backend)
+            const masterResp = await serverAPI.callPluginMethod("get_master_enabled", {});
+            if (masterResp.success) {
+                let masterVal = masterResp.result as boolean;
+                if (oldExists && masterVal) {
+                    await serverAPI.callPluginMethod("set_master_enabled", { enabled: false });
+                    masterVal = false;
+                }
+                setMasterEnabled(masterVal);
             }
         }, 5000);
         return () => clearInterval(interval);
@@ -142,12 +241,12 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
         paramTimeouts.current[paramName] = window.setTimeout(async () => {
             await serverAPI.callPluginMethod("set_shader_param", { name: paramName, value });
             await applyShader();
-        }, 500);
+        }, 150);
     };
 
     // --- Render a single parameter control ---
     const renderParam = (p: ShaderParam) => {
-        const isDisabled = !shadersEnabled || selectedShader.data === "None";
+        const isDisabled = selectedShader.data === "None";
 
         if (p.type === "bool") {
             return (
@@ -176,21 +275,16 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
             return (
                 <PanelSectionRow key={p.name}>
-                    <div style={{ marginBottom: "4px", fontSize: "12px" }}>
-                        {formatDisplayName(p.ui_label || p.name)}
-                    </div>
-                    <div style={{ marginTop: "4px", marginBottom: "10px", fontSize: "12px" }}>
-                        <Dropdown
-                            menuLabel={formatDisplayName(p.ui_label || p.name)}
-                            strDefaultLabel={selectedOption?.label as string || "Unknown"}
-                            rgOptions={comboOptions}
-                            selectedOption={selectedOption}
-                            disabled={isDisabled}
-                            onChange={(opt: DropdownOption) => {
-                                handleParamChange(p.name, opt.data as number);
-                            }}
-                        />
-                    </div>
+                    <DropdownItem
+                        label={formatDisplayName(p.ui_label || p.name)}
+                        menuLabel={formatDisplayName(p.ui_label || p.name)}
+                        rgOptions={comboOptions}
+                        selectedOption={selectedOption.data}
+                        disabled={isDisabled}
+                        onChange={(opt: DropdownOption) => {
+                            handleParamChange(p.name, opt.data as number);
+                        }}
+                    />
                 </PanelSectionRow>
             );
         }
@@ -233,13 +327,79 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
 
     return (
         <div>
+            <PanelSection>
+                {oldVersionExists && (
+                    <PanelSectionRow>
+                        <div style={{ color: "#ff4444", fontWeight: "bold", padding: "10px", border: "1px solid #ff4444", borderRadius: "4px", margin: "10px 0" }}>
+                            WARNING: Conflicting with Reshadeck detected. The Master Switch is disabled. Remove Reshadeck to enable it.
+                        </div>
+                    </PanelSectionRow>
+                )}
+                {crashDetected && !oldVersionExists && (
+                    <PanelSectionRow>
+                        <div style={{ color: "#ff4444", fontWeight: "bold", padding: "10px", border: "1px solid #ff4444", borderRadius: "4px", margin: "10px 0" }}>
+                            WARNING: A crash was detected. The Master Switch has been disabled for safety.
+                        </div>
+                    </PanelSectionRow>
+                )}
+                <PanelSectionRow>
+                    <ToggleField
+                        label="Master Switch"
+                        checked={masterEnabled && !oldVersionExists}
+                        disabled={oldVersionExists}
+                        onChange={async (enabled: boolean) => {
+                            if (oldVersionExists) return;
+                            setMasterEnabled(enabled);
+                            if (enabled) {
+                                setCrashDetected(false);
+                            }
+                            await serverAPI.callPluginMethod("set_master_enabled", { enabled });
+                        }}
+                    />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                    <div
+                        style={{
+                            display: "flex",
+                            cursor: "pointer"
+                        }}
+                        onClick={() => {
+                            const newVal = !infoExpanded;
+                            setInfoExpanded(newVal);
+                            localStorage.setItem("reshadeck-info-expanded", String(newVal));
+                        }}
+                    >
+                        <div style={{ fontWeight: "bold" }}>Information</div>
+                        <div style={{ fontSize: "1.2em" }}>{infoExpanded ? <RiArrowDownSLine /> : <RiArrowRightSLine />}</div>
+                    </div>
+                    {infoExpanded && (
+                        <>
+                            <div>- Disabling the master switch will prevent shaders from applying.</div>
+                            <div>- WARNING: Shaders can lead to dropped frames and possibly even severe performance problems.</div>
+                            <div>- You can add custom .fx shaders in <pre>~/.local/share/gamescope/</pre><pre>reshade/Shaders</pre></div>
+                            <ButtonItem
+                                layout="below"
+                                onClick={() => {
+                                    setInfoExpanded(false);
+                                    localStorage.setItem("reshadeck-info-expanded", "false");
+                                }}
+                            >
+                                Hide Information
+                            </ButtonItem>
+                        </>
+                    )}
+                </PanelSectionRow>
+
+            </PanelSection>
+
+
+
 
             <PanelSection title="Profile">
                 <PanelSectionRow>
                     <ToggleField
-                        label="Per-Game Profile"
+                        label="Per-game profile"
                         checked={perGame}
-                        bottomSeparator="none"
                         onChange={async (checked: boolean) => {
                             setPerGame(checked);
                             await serverAPI.callPluginMethod("set_per_game", { enabled: checked });
@@ -248,45 +408,72 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                         }}
                     />
                 </PanelSectionRow>
-
                 {perGame && (
                     <PanelSectionRow>
-                        <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
-                            <div style={{ fontWeight: "bold" }}>{currentGameName}</div>
+                        <div style={{ display: "flex", flexDirection: "row" }}>
+                            <span style={{ fontWeight: "bold", marginRight: "5px" }}>Active profile:</span>
+                            <span>{currentGameName}</span>
                         </div>
                     </PanelSectionRow>
                 )}
             </PanelSection>
 
             <PanelSection title="Shader">
-                <PanelSectionRow>
-                    <ToggleField
-                        label="Enable Shaders"
-                        checked={shadersEnabled}
+                <PanelSectionRow key="Package">
+                    <DropdownItem
+                        label="Package"
+                        menuLabel="Package"
                         bottomSeparator="none"
-                        onChange={async (enabled: boolean) => {
-                            setShadersEnabled(enabled);
-                            await serverAPI.callPluginMethod("set_shader_enabled", { isEnabled: enabled });
-                            await serverAPI.callPluginMethod("toggle_shader", {
-                                shader_name: enabled ? selectedShader.data : "None"
-                            });
+                        rgOptions={packageOptions}
+                        selectedOption={selectedPackage.data}
+                        onChange={async (newPkg: DropdownOption) => {
+                            if (newPkg.data === selectedPackage.data) {
+                                return;
+                            }
+                            const matchedPkg = packageOptions.find(p => p.data === newPkg.data) || newPkg;
+                            setSelectedPackage(matchedPkg);
+                            await serverAPI.callPluginMethod("set_active_category", { category: newPkg.data });
+                            try {
+                                const resp = await serverAPI.callPluginMethod("get_shader_list", { category: newPkg.data });
+                                const list = (resp.success && Array.isArray(resp.result))
+                                    ? (resp.result as string[])
+                                    : [];
+                                setShaderList(list);
+                            } catch (e) {
+                                console.error("Failed to fetch shader list", e);
+                                setShaderList([]);
+                            }
+                            setSelectedShader(baseShader);
+                            await serverAPI.callPluginMethod("set_shader", { shader_name: "None" });
+                            setShaderParams([]);
                         }}
                     />
                 </PanelSectionRow>
-                <PanelSectionRow>
-                    <div style={{ marginTop: "4px" }}>
-                        <Dropdown
-                            menuLabel="Select shader"
-                            strDefaultLabel={selectedShader.label as string}
-                            rgOptions={shaderOptions}
-                            selectedOption={selectedShader}
-                            onChange={async (newSelectedShader: DropdownOption) => {
-                                setSelectedShader(newSelectedShader);
-                                await serverAPI.callPluginMethod("set_shader", { shader_name: newSelectedShader.data });
+                <PanelSectionRow key="Shader">
+                    <DropdownItem
+                        label="Shader"
+                        menuLabel="Select shader"
+                        rgOptions={shaderDropdownOptions}
+                        selectedOption={
+                            selectedShader.data === "None"
+                                ? -1
+                                : shaderList.indexOf(selectedShader.data as string)
+                        }
+                        onChange={async (opt: DropdownOption) => {
+                            const idx = opt.data as number;
+                            if (idx === -1) {
+                                setSelectedShader(baseShader);
+                                await serverAPI.callPluginMethod("set_shader", { shader_name: "None" });
+                                setShaderParams([]);
+                            } else {
+                                const path = shaderList[idx];
+                                const label = opt.label as string;
+                                setSelectedShader({ data: path, label });
+                                await serverAPI.callPluginMethod("set_shader", { shader_name: path });
                                 await fetchShaderParams();
-                            }}
-                        />
-                    </div>
+                            }
+                        }}
+                    />
                 </PanelSectionRow>
             </PanelSection>
 
@@ -295,40 +482,69 @@ const Content: VFC<{ serverAPI: ServerAPI }> = ({ serverAPI }) => {
                     {shaderParams.map(p => renderParam(p))}
                     <PanelSectionRow>
                         <ButtonItem
-                            disabled={!shadersEnabled || selectedShader.data === "None"}
+                            disabled={selectedShader.data === "None"}
                             bottomSeparator="none"
+                            layout="below"
                             onClick={async () => {
                                 await serverAPI.callPluginMethod("reset_shader_params", {});
                                 await fetchShaderParams();
                                 await applyShader();
                             }}
-                        >Reset to Defaults</ButtonItem>
+                        >Reset parameters</ButtonItem>
                     </PanelSectionRow>
                 </PanelSection>
             )}
 
+
+
             <PanelSection title="Misc">
+
                 <PanelSectionRow>
                     <ButtonItem
-                        disabled={applyDisabled || !shadersEnabled || selectedShader.data === "None"}
                         bottomSeparator="none"
-                        onClick={async () => {
-                            setApplyDisabled(true);
-                            setTimeout(() => setApplyDisabled(false), 1000);
-                            await applyShader();
+                        layout="below"
+                        onClick={() => {
+                            showModal(
+                                <ConfirmModal
+                                    strTitle="Reset configuration?"
+                                    strDescription="Are you sure? This will reset all plugin settings, including per-game profiles and shader parameters."
+                                    onOK={async () => {
+                                        await serverAPI.callPluginMethod("reset_configuration", {});
+                                        await initState();
+                                    }}
+                                />
+                            );
                         }}
-                    >Force Apply</ButtonItem>
+                    >
+                        Reset configuration
+                    </ButtonItem>
                 </PanelSectionRow>
+
+                <PanelSectionRow>
+                    <ButtonItem
+                        bottomSeparator="none"
+                        layout="below"
+                        onClick={() => {
+                            showModal(
+                                <ConfirmModal
+                                    strTitle="Reset reshade directory?"
+                                    strDescription="Are you sure? This will remove all files in ~/.local/share/gamescope/reshade and replace them with the default files from this plugin."
+                                    onOK={async () => {
+                                        await serverAPI.callPluginMethod("reset_reshade_directory", {});
+                                        await initState();
+                                    }}
+                                />
+                            );
+                        }}
+                    >
+                        Reset local Reshade directory
+                    </ButtonItem>
+                </PanelSectionRow>
+
+
             </PanelSection>
 
-            <PanelSection title="Information">
-                <PanelSectionRow>
-                    <div>Place any custom shaders in <pre>~/.local/share/gamescope</pre><pre>/reshade/Shaders</pre> so that the .fx files are in the root of the Shaders folder.</div>
-                </PanelSectionRow>
-                <PanelSectionRow>
-                    <div>WARNING: Shaders can lead to dropped frames and possibly even severe performance problems.</div>
-                </PanelSectionRow>
-            </PanelSection>
+
         </div>
     );
 };

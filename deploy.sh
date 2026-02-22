@@ -2,8 +2,8 @@
 # deploy.sh — Build and copy plugin files to the Decky homebrew directory
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
-DEST="$HOME/homebrew/plugins/Reshadeck"
-PLUGIN_NAME="Reshadeck"
+DEST="$HOME/homebrew/plugins/ReshadeckPlus"
+PLUGIN_NAME="ReshadeckPlus"
 
 # Ensure we are in the project root
 cd "$SRC"
@@ -35,19 +35,22 @@ echo "Staging files..."
 
 # 3. Copy necessary files to the staging directory
 # Using cp to copy files (symlinks removed)
-cp -r \
+# Using cp to copy files (symlinks resolved)
+cp -R -L \
     dist \
     shaders \
     textures \
     main.py \
+    utils \
     plugin.json \
     package.json \
     LICENSE \
     README.md \
     "$STAGING_DIR"
 
-# Remove source maps if present
+# Remove source maps and python caches if present
 rm -f "$STAGING_DIR/dist/"*.map
+find "$STAGING_DIR" -type d -name "__pycache__" -exec rm -rf {} +
 
 # 4. Deploy using rsync
 echo "Syncing files to $DEST..."

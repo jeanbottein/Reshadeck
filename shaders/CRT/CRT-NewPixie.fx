@@ -110,7 +110,7 @@ float4 PS_NewPixie_Blur(float4 pos : SV_Position, float2 uv_tx : TEXCOORD0) : SV
 
 //PASS 4
 uniform int FCount < source = "framecount"; >;
-texture tFrame < source = "crt-newpixie/crtframe.png"; >
+texture tFrame < source = "CRT/crt-newpixie/crtframe.png"; >
 {
 	Width = 1024;
 	Height = 1024;

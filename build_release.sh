@@ -3,8 +3,8 @@
 # Ensure we are in the project root first
 cd "$(dirname "$0")"
 
-# Configuration — PLUGIN_NAME matches the install directory (must stay "Reshadeck")
-PLUGIN_NAME="Reshadeck"
+# Configuration — PLUGIN_NAME matches the install directory (must stay "ReshadeckPlus")
+PLUGIN_NAME="ReshadeckPlus"
 # Read version from package.json using node or jq. 
 # Using node as it's guaranteed to be present for a node project.
 if command -v jq &> /dev/null; then
@@ -20,7 +20,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 AUTHOR="jeanbottein"
-ZIP_NAME="${AUTHOR}-${PLUGIN_NAME,,}-${VERSION}.zip"
+ZIP_NAME="${PLUGIN_NAME,,}-${VERSION}.zip"
 
 echo "Starting build process for ${ZIP_NAME}..."
 
@@ -47,20 +47,22 @@ mkdir -p "$STAGING_DIR"
 echo "Staging files..."
 
 # 3. Copy necessary files to the staging directory
-# Using cp to copy files (symlinks removed)
-cp -r \
+# Using cp to copy files (symlinks resolved)
+cp -R -L \
     dist \
     shaders \
     textures \
     main.py \
+    utils \
     plugin.json \
     package.json \
     LICENSE \
     README.md \
     "$STAGING_DIR"
 
-# Remove source maps if present
+# Remove source maps and python caches if present
 rm -f "$STAGING_DIR/dist/"*.map
+find "$STAGING_DIR" -type d -name "__pycache__" -exec rm -rf {} +
 
 # 4. Create the zip file
 echo "Creating zip archive..."

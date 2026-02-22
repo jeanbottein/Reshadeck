@@ -20,6 +20,7 @@ env: ## Create default .env file
 	@jq -r .name package.json >> .env
 
 init: ## Initialize project
+	@$(MAKE) submodules
 	@$(MAKE) env
 	@$(MAKE) vendor
 	@echo -e "\n\033[1;36m Almost ready! Just a few things left to do:\033[0m\n"
@@ -51,7 +52,7 @@ deploy-steamdeck: ## Deploy plugin build to steamdeck
 	@echo "+ $@"
 	@ssh $(DECK_USER)@$(DECK_HOST) -p $(DECK_PORT) -i $(DECK_KEY) \
  		'chmod -v 755 $(DECK_HOME)/homebrew/plugins/ && mkdir -p $(DECK_HOME)/homebrew/plugins/$(PLUGIN_FOLDER)'
-	@rsync -azp --delete --progress -e "ssh -p $(DECK_PORT) -i $(DECK_KEY)" \
+	@rsync -azpL --delete --progress -e "ssh -p $(DECK_PORT) -i $(DECK_KEY)" \
 		--chmod=Du=rwx,Dg=rx,Do=rx,Fu=rwx,Fg=rx,Fo=rx \
 		--exclude='.git/' \
 		--exclude='.github/' \
@@ -60,10 +61,11 @@ deploy-steamdeck: ## Deploy plugin build to steamdeck
 		--exclude='.pnpm-store/' \
 		--exclude='src/' \
 		--exclude='*.log' \
-		--exclude='.gitignore' . \
-		--exclude='.idea' . \
-		--exclude='.env' . \
-		--exclude='Makefile' . \
+		--exclude='__pycache__/' \
+		--exclude='.gitignore' \
+		--exclude='.idea' \
+		--exclude='.env' \
+		--exclude='Makefile' \
  		./ $(DECK_USER)@$(DECK_HOST):$(DECK_HOME)/homebrew/plugins/$(PLUGIN_FOLDER)/
 	@ssh $(DECK_USER)@$(DECK_HOST) -p $(DECK_PORT) -i $(DECK_KEY) \
  		'chmod -v 755 $(DECK_HOME)/homebrew/plugins/'

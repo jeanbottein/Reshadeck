@@ -38,7 +38,7 @@ uniform float texture_sizeY <
 //Stuff
 #define texture_size float2(texture_sizeX, texture_sizeY)
 
-texture tMaskThick <source="crt_potato/crt-potato-thick.png";> { Width=2; Height=5;};
+texture tMaskThick <source = "CRT/crt_potato/crt-potato-thick.png";> { Width=2; Height=5;};
 sampler sMaskThick {
   Texture=tMaskThick;
   MinFilter=POINT;
