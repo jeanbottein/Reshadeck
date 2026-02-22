@@ -21,15 +21,17 @@ def save_config_immediate():
 
         key = config_key()
         
-        saved_params = {}
-        if State.active_shader in State.shader_parameters:
-            saved_params[State.active_shader] = State.shader_parameters[State.active_shader]
+        shaders = []
+        if State.active_shader != "None":
+            shaders.append({
+                "shader": State.active_shader,
+                "category": State.active_category,
+                "parameters": State.shader_parameters.get(State.active_shader, {})
+            })
 
         entry = {
             "appname": State.appname if State.per_game_mode else "Global",
-            "current": State.active_shader,
-            "active_category": State.active_category,
-            "params": saved_params,
+            "shaders": shaders,
         }
         if State.per_game_mode:
             entry["per_game"] = True
@@ -68,9 +70,18 @@ def load_config_state(appid: str):
         config = app_config if is_per_game else data.get("_global", {})
 
         State.master_switch = data.get("master_enabled", True)
-        State.active_shader = config.get("current", "None")
-        State.active_category = config.get("active_category", "Default")
-        State.shader_parameters = config.get("params", {})
+        
+        shaders = config.get("shaders", [])
+        if shaders and isinstance(shaders, list) and len(shaders) > 0:
+            first_pass = shaders[0]
+            State.active_shader = first_pass.get("shader", "None")
+            State.active_category = first_pass.get("category", "Default")
+            # Convert to dictionary keyed by shader name as expected by the rest of the application
+            State.shader_parameters = {State.active_shader: first_pass.get("parameters", {})} if State.active_shader != "None" else {}
+        else:
+            State.active_shader = "None"
+            State.active_category = "Default"
+            State.shader_parameters = {}
         
     except Exception as e:
         logger.error(f"Failed to read config: {e}")
