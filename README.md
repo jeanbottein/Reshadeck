@@ -2,6 +2,16 @@
 
 This is a fork of a fork based on the work of [mspeedo/Reshadeck](https://github.com/mspeedo/Reshadeck) and originally [safijari/Reshadeck](https://github.com/safijari/Reshadeck).
 
+**Important:** You must uninstall any other versions of Reshadeck for this fork to work correctly.
+
+## Key Differences from Original Reshadeck
+- Per-game profiles
+- Dynamic parameters per shader
+- Tested packaged shaders
+- Grouped by package
+- On-the-fly adapter for shaders to maximize compatibility
+- Crash detection and circuit breaker with a master switch in case of problematic shaders
+
 It is hosted here: [https://github.com/jeanbottein/ReshadeckPlus](https://github.com/jeanbottein/ReshadeckPlus).
 
 Reshade Shader Loader for Decky Plugin Loader for the handheld Steam Game Loader. It ships with a small curated set of shaders.
